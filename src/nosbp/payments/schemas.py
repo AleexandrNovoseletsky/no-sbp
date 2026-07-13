@@ -1,7 +1,5 @@
 """Схемы для генерации платежей."""
 
-from enum import StrEnum
-
 from pydantic import BaseModel, Field
 
 
@@ -28,10 +26,21 @@ class PaymentDetails(BaseModel):
         pattern=r"^\d{9}$",
     )
 
+    payee_inn: str = Field(
+        description="ИНН получателя",
+        pattern=r"^\d{10}$|^\d{12}$",
+    )
+
     corresp_acc: str | None = Field(
         description="Корр.счёт",
         default=None,
         pattern=r"^\d{20}$",
+    )
+
+    kpp: str | None = Field(
+        description="КПП получателя",
+        default=None,
+        pattern=r"^\d{9}$",
     )
 
     payment_sum: int | None = Field(
@@ -57,8 +66,8 @@ class PaymentDetails(BaseModel):
         default=None,
         max_length=160,
     )
-    
-    midle_name: str | None = Field(
+ 
+    middle_name: str | None = Field(
         description="Отчество плательщика",
         default=None,
         max_length=160,
@@ -69,28 +78,3 @@ class PaymentDetails(BaseModel):
         default=None,
         max_length=25
     )
-
-class QrErrorCorrectionLevel(StrEnum):
-    """Уровни исправления QR-кода."""
-
-    LOW = "L"
-    MEDIUM = "M"
-    QUARTILE = "Q"
-    HIGH = "H"
-
-
-class PaymentQrRequest(BaseModel):
-    """Данные для генерации QR-кода оплаты."""
-
-    recipient: PaymentDetails
-
-    additional_fields: dict[str, str] | None = Field(
-        description="Дополнительные поля",
-        default_factory=dict,
-    )
-
-    qr_error_correction_level: QrErrorCorrectionLevel = Field(
-        description="Уровень исправления QR-кода",
-        default=QrErrorCorrectionLevel.MEDIUM,
-    )
-
