@@ -16,7 +16,7 @@ def get_payment_details(
     purpose: str | None = Query(None, description="Назначение платежа"),
     first_name: str | None = Query(None, description="Имя плательщика"),
     last_name: str | None = Query(None, description="Фамилия плательщика"),
-    midle_name: str | None = Query(None, description="Отчество плательщика"),
+    middle_name: str | None = Query(None, description="Отчество плательщика"),
     phone: str | None = Query(None, description="Телефон плательщика"),
 ) -> PaymentDetails:
     try:
@@ -31,8 +31,8 @@ def get_payment_details(
             purpose=purpose,
             first_name=first_name,
             last_name=last_name,
-            midle_name=midle_name,
+            middle_name=middle_name,
             phone=phone,
         )
     except ValidationError as exc:
-        raise HTTPException(status_code=422, detail=exc.errors())
+        raise HTTPException(status_code=422, detail=exc.errors()) from exc

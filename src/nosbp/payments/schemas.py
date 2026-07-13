@@ -66,7 +66,7 @@ class PaymentDetails(BaseModel):
         default=None,
         max_length=160,
     )
- 
+
     middle_name: str | None = Field(
         description="Отчество плательщика",
         default=None,
