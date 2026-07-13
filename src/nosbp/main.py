@@ -1,3 +1,4 @@
+"""Точка взода в ASGI приложение."""
 
 from fastapi import FastAPI
 
@@ -6,7 +7,7 @@ app = FastAPI(
     description=("API для генерации QR-кода для оплаты "
                  "по счёту (ГОСТ 56042-2014)."
                  )
-        )
+    )
 
 
 @app.get("/health", tags=["Health"])
