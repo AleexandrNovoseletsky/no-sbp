@@ -1,3 +1,6 @@
+"""Зависимости для модуля платежей."""
+
+
 from fastapi import HTTPException, Query
 from pydantic import ValidationError
 

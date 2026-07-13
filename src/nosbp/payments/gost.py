@@ -9,13 +9,14 @@ def build_gost_payload(details: PaymentDetails) -> str:
         "PersonalAcc": details.personal_acc,
         "BankName": details.bank_name,
         "BIC": details.bic,
+        "PayeeINN": details.payee_inn,
         "CorrespAcc": details.corresp_acc,
         "Sum": details.payment_sum,
         "Purpose": details.purpose,
         "LastName": details.last_name,
         "FirstName": details.first_name,
         "MiddleName": details.middle_name,
-        "PayerPhone": details.phone,
+        "Phone": details.phone,
     }
 
     parts = [

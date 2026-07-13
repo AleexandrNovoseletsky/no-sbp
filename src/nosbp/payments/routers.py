@@ -2,10 +2,11 @@
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Response
 
 from nosbp.payments.dependencies import get_payment_details
 from nosbp.payments.gost import build_gost_payload
+from nosbp.payments.qr import render_qr_png
 from nosbp.payments.schemas import PaymentDetails
 
 router = APIRouter()
@@ -22,13 +23,15 @@ PaymentDetailsDep = Annotated[
     path="/",
     summary="Получить QR-код",
     description="Получить QR-код для оплаты по реквизитам счёта.",
+    response_class=Response,
 )
 async def get_payment_qr(
     details: PaymentDetailsDep,
-) -> str:
+) -> Response:
     """Возвращает изображение в png формате.
 
     Изображение – QR-код, сгенирированный по ГОСТ ГОСТ Р 56042-2014.
     """
     gost_text = build_gost_payload(details=details)
-    return gost_text
+    png_bytes = render_qr_png(payload=gost_text)
+    return Response(content=png_bytes, media_type="image/png")
