@@ -4,7 +4,7 @@
 from fastapi import HTTPException, Query
 from pydantic import ValidationError
 
-from nosbp.payments.schemas import PaymentDetails
+from payments.schemas import PaymentDetails
 
 
 def get_payment_details(
@@ -30,6 +30,7 @@ def get_payment_details(
             bic=bic,
             payee_inn=payee_inn,
             corresp_acc=corresp_acc,
+            kpp=kpp,
             payment_sum=payment_sum,
             purpose=purpose,
             first_name=first_name,

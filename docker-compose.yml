@@ -1,0 +1,10 @@
+services:
+  qr-service:
+    build: .
+    container_name: nosbp-qr-service
+    restart: unless-stopped
+    environment:
+      - ENVIRONMENT=production
+      - LOG_LEVEL=INFO
+    ports:
+      - "127.0.0.1:8000:8000"

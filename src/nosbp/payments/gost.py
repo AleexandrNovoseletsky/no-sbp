@@ -1,4 +1,4 @@
-from nosbp.payments.schemas import PaymentDetails
+from payments.schemas import PaymentDetails
 
 
 def build_gost_payload(details: PaymentDetails) -> str:
@@ -18,7 +18,6 @@ def build_gost_payload(details: PaymentDetails) -> str:
         "MiddleName": details.middle_name,
         "Phone": details.phone,
     }
-
     parts = [
         f"{key}={value}" for key, value in fields.items() if value is not None
     ]

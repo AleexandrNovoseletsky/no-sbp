@@ -2,7 +2,10 @@
 
 from fastapi import FastAPI
 
-from nosbp.payments.routers import router as payment_qr_router
+from core.logging import configure_logging
+from payments.routers import router as payment_qr_router
+
+configure_logging(json_logs=False, log_level="INFO")
 
 app = FastAPI(
     title="NoSBP API",
