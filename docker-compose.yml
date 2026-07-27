@@ -3,6 +3,8 @@ services:
     build: .
     container_name: nosbp-qr-service
     restart: unless-stopped
+    volumes:
+      - ./data:/app/data
     environment:
       - ENVIRONMENT=production
       - LOG_LEVEL=INFO

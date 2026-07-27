@@ -5,10 +5,10 @@ from typing import Annotated
 import structlog
 from fastapi import APIRouter, Depends, Response
 
-from payments.dependencies import get_payment_details
-from payments.gost import build_gost_payload
-from payments.qr import render_qr_png
-from payments.schemas import PaymentDetails
+from src.nosbp.payments.dependencies import get_payment_details
+from src.nosbp.payments.gost import build_gost_payload
+from src.nosbp.payments.qr import render_qr_png
+from src.nosbp.payments.schemas import PaymentDetails
 
 router = APIRouter()
 log = structlog.get_logger()
@@ -35,9 +35,10 @@ async def get_payment_qr(
     Изображение – QR-код, сгенирированный по ГОСТ ГОСТ Р 56042-2014.
     """
     log.info(
-        "request_received", recipient=details.name, paymant_amount=details.payment_sum
+        "request_received",
+        recipient=details.name,
+        paymant_amount=details.payment_sum
     )
     gost_text = build_gost_payload(details=details)
     png_bytes = render_qr_png(payload=gost_text)
     return Response(content=png_bytes, media_type="image/png")
-

@@ -36,5 +36,5 @@ class Client(Base):
 
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime.datetime] = mapped_column(
-        DateTime, default=datetime.datetime.now(datetime.timezone.utc)
+        DateTime, default=lambda: datetime.datetime.now(datetime.timezone.utc)
         )

@@ -1,4 +1,4 @@
-from payments.schemas import PaymentDetails
+from src.nosbp.payments.schemas import PaymentDetails
 
 
 def build_gost_payload(details: PaymentDetails) -> str:
