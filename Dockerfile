@@ -10,11 +10,11 @@ WORKDIR /app
 
 RUN pip install --no-cache-dir poetry
 
-COPY pyproject.toml poetry.lock ./
+COPY pyproject.toml ./
 RUN poetry install --no-root --only main
 
 COPY src ./src
 
-EXPOSE 8000
+EXPOSE 8080
 
-CMD ["uvicorn", "nosbp.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "nosbp.main:app", "--host", "0.0.0.0", "--port", "8080"]
