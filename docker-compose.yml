@@ -1,7 +1,7 @@
 services:
   qr-service:
     build: .
-    container_name: nosbp-qr-service
+    container_name: nosbp-qr-service-dev
     restart: unless-stopped
     volumes:
       - ./data:/app/data
