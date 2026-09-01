@@ -1,48 +1,83 @@
-"""Зависимости для эндпоинтов оплаты."""
+"""Зависимости FastAPI для эндпоинтов генерации QR."""
 
-from fastapi import Depends, HTTPException, Query
+from typing import Annotated
+
+from fastapi import Depends, Request
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from nosbp.db.database import get_db
-from nosbp.db.models import Client
-from nosbp.payments.schemas import PaymentDetails
+from nosbp.core.config import Settings, get_settings
+from nosbp.core.errors import InvalidTokenError, OrganizationNotFoundError
+from nosbp.db.base import utcnow
+from nosbp.db.models import Account, ApiToken, Organization
+from nosbp.db.session import get_db
+from nosbp.payments.tokens import hash_token
+from nosbp.storage.logo_cache import LogoCache
+
+DbSession = Annotated[AsyncSession, Depends(get_db)]
+AppSettings = Annotated[Settings, Depends(get_settings)]
 
 
-async def get_payment_details(
-    api_key: str = Query(..., description="API-ключ клиента"),
-    payment_sum: int | None = Query(
-        None, description="Сумма платежа в копейках"
-    ),
-    purpose: str | None = Query(None, description="Назначение платежа"),
-    first_name: str | None = Query(None, description="Имя плательщика"),
-    last_name: str | None = Query(None, description="Фамилия плательщика"),
-    middle_name: str | None = Query(None, description="Отчество плательщика"),
-    phone: str | None = Query(None, description="Телефон плательщика"),
-    db: AsyncSession = Depends(get_db),
-) -> PaymentDetails:
-    """Находит клиента по api_key и собирает полные данные для генерации QR."""
-    result = await db.execute(select(Client).where(Client.api_key == api_key))
-    client = result.scalar_one_or_none()
+def get_logo_cache(request: Request) -> LogoCache:
+    """Отдаёт кэш логотипов, созданный при старте приложения."""
+    cache: LogoCache = request.app.state.logo_cache
+    return cache
 
-    if client is None or not client.is_active:
-        raise HTTPException(
-            status_code=401, detail="Неверный или неактивный api_key"
-        )
 
-    return PaymentDetails(
-        # Статика — из БД, по найденному клиенту
-        name=client.name,
-        personal_acc=client.personal_acc,
-        bank_name=client.bank_name,
-        bic=client.bic,
-        corresp_acc=client.corresp_acc,
-        payee_inn=client.payee_inn,
-        # Динамика — из query-параметров запроса
-        payment_sum=payment_sum,
-        purpose=purpose,
-        first_name=first_name,
-        last_name=last_name,
-        middle_name=middle_name,
-        phone=phone,
+LogoCacheDep = Annotated[LogoCache, Depends(get_logo_cache)]
+
+
+async def authenticate(session: AsyncSession, token: str) -> Account:
+    """Находит аккаунт по токену.
+
+    Сравнение идёт по хэшу: сам токен в базе не хранится.
+
+    :raises InvalidTokenError: токен не найден, отозван либо аккаунт отключён.
+    """
+    result = await session.execute(
+        select(ApiToken).where(ApiToken.token_hash == hash_token(token))
     )
+    api_token = result.scalar_one_or_none()
+
+    if api_token is None or not api_token.is_usable:
+        raise InvalidTokenError("Ключ не найден или отозван.")
+
+    account = await session.get(Account, api_token.account_id)
+    if account is None or not account.is_active:
+        raise InvalidTokenError("Аккаунт отключён.")
+
+    # Отметка последнего использования нужна заказчику в кабинете:
+    # по ней видно, какой из ключей ещё работает, а какой можно отозвать.
+    api_token.last_used_at = utcnow()
+    return account
+
+
+async def resolve_organization(
+    session: AsyncSession, account: Account, alias: str | None
+) -> Organization:
+    """Выбирает организацию-получателя платежа.
+
+    Если алиас не передан, берётся организация по умолчанию — так заказчику
+    с единственным юрлицом не приходится указывать её в каждом запросе.
+
+    :raises OrganizationNotFoundError: подходящей организации нет.
+    """
+    query = select(Organization).where(Organization.account_id == account.id)
+    if alias is not None:
+        query = query.where(Organization.alias == alias)
+    else:
+        query = query.where(Organization.is_default.is_(True))
+
+    result = await session.execute(query)
+    organization = result.scalars().first()
+
+    if organization is None:
+        if alias is not None:
+            raise OrganizationNotFoundError(
+                f"Организация «{alias}» не найдена. Проверьте параметр org."
+            )
+        raise OrganizationNotFoundError(
+            "У аккаунта нет организации по умолчанию. Укажите параметр org "
+            "или отметьте одну из организаций основной."
+        )
+    return organization

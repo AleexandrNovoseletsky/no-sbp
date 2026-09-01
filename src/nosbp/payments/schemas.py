@@ -1,80 +1,63 @@
-"""Схемы для генерации платежей."""
+"""Схемы данных для генерации платёжного QR-кода."""
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
-class PaymentDetails(BaseModel):
-    """Получатель платежа."""
+class PayerInfo(BaseModel):
+    """Данные плательщика.
 
-    name: str = Field(
-        description="Название получателя платежа",
-        min_length=1,
-        max_length=160,
-    )
-    personal_acc: str = Field(
-        description="Расчётный счёт",
-        pattern=r"^\d{20}$",
-    )
-    bank_name: str = Field(
-        description="Наименование банка",
-        min_length=1,
-        max_length=45,
-    )
+    Эти поля попадают в строку ГОСТ, но НИКОГДА не сохраняются в базу —
+    они участвуют только в вычислении ключа идемпотентности, то есть
+    превращаются в необратимый хэш. Хранение персональных данных
+    плательщиков — забота заказчика, а не сервиса.
+    """
 
-    bic: str = Field(
-        description="БИК банка",
-        pattern=r"^\d{9}$",
-    )
+    model_config = ConfigDict(frozen=True)
 
-    payee_inn: str = Field(
-        description="ИНН получателя",
-        pattern=r"^\d{10}$|^\d{12}$",
-    )
+    last_name: str | None = Field(default=None, max_length=160)
+    first_name: str | None = Field(default=None, max_length=160)
+    middle_name: str | None = Field(default=None, max_length=160)
+    phone: str | None = Field(default=None, max_length=25)
 
-    corresp_acc: str | None = Field(
-        description="Корр.счёт",
-        default=None,
-        pattern=r"^\d{20}$",
-    )
+    @property
+    def is_empty(self) -> bool:
+        """Плательщик не указан вовсе."""
+        return not any((self.last_name, self.first_name, self.middle_name, self.phone))
 
-    kpp: str | None = Field(
-        description="КПП получателя",
-        default=None,
-        pattern=r"^\d{9}$",
-    )
 
-    payment_sum: int | None = Field(
-        description="Сумма платежа в копейках",
+class PaymentRequest(BaseModel):
+    """Динамическая часть запроса — то, что меняется от счёта к счёту."""
+
+    model_config = ConfigDict(frozen=True)
+
+    sum_kopecks: int | None = Field(
         default=None,
         ge=1,
+        le=99_999_999_999,
+        description="Сумма платежа в копейках, как того требует ГОСТ.",
     )
-
     purpose: str | None = Field(
-        description="Назначение платежа",
         default=None,
         max_length=210,
+        description="Назначение платежа.",
     )
+    payer: PayerInfo = Field(default_factory=PayerInfo)
 
-    first_name: str | None = Field(
-        description="Имя плательщика",
-        default=None,
-        max_length=160,
-    )
 
-    last_name: str | None = Field(
-        description="Фамилия плательщика",
-        default=None,
-        max_length=160,
-    )
+class PayeeRequisites(BaseModel):
+    """Реквизиты получателя платежа.
 
-    middle_name: str | None = Field(
-        description="Отчество плательщика",
-        default=None,
-        max_length=160,
-    )
+    Собирается из модели ``Organization``. Валидация форматов происходит
+    при сохранении организации, а не на каждом запросе — здесь схема нужна
+    как typed-контракт между слоем данных и генератором строки ГОСТ.
+    """
 
-    phone: str | None = Field(
-        description="Телефон плательщика",
-        default=None,
-        max_length=25
-    )
+    model_config = ConfigDict(frozen=True)
+
+    name: str = Field(min_length=1, max_length=160)
+    personal_acc: str = Field(pattern=r"^\d{20}$")
+    bank_name: str = Field(min_length=1, max_length=45)
+    bic: str = Field(pattern=r"^\d{9}$")
+    corresp_acc: str = Field(pattern=r"^\d{20}$")
+    payee_inn: str = Field(pattern=r"^\d{10}$|^\d{12}$")
+    kpp: str | None = Field(default=None, pattern=r"^\d{9}$")

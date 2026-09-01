@@ -1,12 +1,68 @@
+# Локальная разработка: база, объектное хранилище и приложение.
+# Для продакшена используется docker-compose.prod.yml.
+
 services:
-  qr-service:
-    build: .
-    container_name: nosbp-qr-service-dev
+  postgres:
+    image: postgres:17-alpine
+    container_name: nosbp-postgres
     restart: unless-stopped
-    volumes:
-      - ./data:/app/data
     environment:
-      - ENVIRONMENT=production
-      - LOG_LEVEL=INFO
+      POSTGRES_USER: nosbp
+      POSTGRES_PASSWORD: nosbp
+      POSTGRES_DB: nosbp
+    ports:
+      # Наружу — нестандартный порт, чтобы не конфликтовать с локальным
+      # PostgreSQL, если он установлен в системе.
+      - "127.0.0.1:55432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U nosbp -d nosbp"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  minio:
+    # S3-совместимое хранилище для логотипов. В продакшене заменяется
+    # на Object Storage провайдера — код при этом не меняется.
+    image: minio/minio:latest
+    container_name: nosbp-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: nosbp
+      MINIO_ROOT_PASSWORD: nosbp-secret
+    ports:
+      - "127.0.0.1:9000:9000"
+      - "127.0.0.1:9001:9001"
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  api:
+    build: .
+    container_name: nosbp-api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_started
+    environment:
+      ENVIRONMENT: local
+      LOG_LEVEL: INFO
+      DATABASE_URL: postgresql+asyncpg://nosbp:nosbp@postgres:5432/nosbp
+      S3_ENDPOINT_URL: http://minio:9000
+      S3_BUCKET: nosbp-logos
+      S3_ACCESS_KEY: nosbp
+      S3_SECRET_KEY: nosbp-secret
     ports:
       - "127.0.0.1:8080:8000"
+
+volumes:
+  postgres-data:
+  minio-data:

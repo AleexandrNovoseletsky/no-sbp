@@ -1,29 +1,82 @@
 """Точка входа FastAPI-приложения."""
 
-import os
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+import structlog
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 
-from src.nosbp.core.logging import configure_logging
-from src.nosbp.db.database import init_db
-from src.nosbp.payments.routes import router as payments_router
+from nosbp.core.config import get_settings
+from nosbp.core.errors import NosbpError
+from nosbp.core.logging import configure_logging
+from nosbp.db.session import dispose_engine
+from nosbp.payments.routes import router as payments_router
+from nosbp.storage.logo_cache import LogoCache
+from nosbp.storage.s3 import S3Storage
 
-ENVIRONMENT = os.getenv("ENVIRONMENT", "local")
-
-configure_logging(
-    json_logs=ENVIRONMENT != "local",
-    log_level=os.getenv("LOG_LEVEL", "INFO"),
-)
+log = structlog.get_logger()
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
-    # Выполняется один раз при старте приложения, до приёма первого запроса
-    await init_db()
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    """Готовит и освобождает ресурсы приложения.
+
+    Схема базы данных здесь НЕ создаётся: за неё отвечает Alembic.
+    Приложение, создающее таблицы само, рано или поздно разойдётся
+    с миграциями, и на проде это обнаружится в худший момент.
+    """
+    settings = get_settings()
+
+    # Тесты подставляют своё хранилище до старта, чтобы не ходить в сеть.
+    if not hasattr(app.state, "storage"):
+        app.state.storage = S3Storage(settings)
+    app.state.logo_cache = LogoCache(app.state.storage)
+
+    log.info("service_started", environment=settings.environment)
     yield
-    # Место для очистки ресурсов при остановке — пока не нужно
+    await dispose_engine()
+    log.info("service_stopped")
 
 
-app = FastAPI(title="NOSBP Payments QR Service", lifespan=lifespan)
-app.include_router(payments_router, prefix="/generate/qr")
+def create_app() -> FastAPI:
+    """Собирает приложение.
+
+    Фабрика, а не глобальный объект: так тесты могут поднять отдельный
+    экземпляр с другими настройками, не перезагружая модуль.
+    """
+    settings = get_settings()
+    configure_logging(json_logs=not settings.is_local, log_level=settings.log_level)
+
+    app = FastAPI(
+        title="NoSBP",
+        description=(
+            "Генерация QR-кодов для оплаты по банковским реквизитам "
+            "по ГОСТ Р 56042-2014."
+        ),
+        version="0.2.0",
+        lifespan=lifespan,
+    )
+
+    @app.exception_handler(NosbpError)
+    async def handle_domain_error(request: Request, exc: NosbpError) -> JSONResponse:
+        """Превращает доменную ошибку в аккуратный JSON.
+
+        GET-эндпоинт генерации QR перехватывает такие ошибки раньше и
+        отдаёт картинку-заглушку — сюда попадает всё остальное.
+        """
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={"error": exc.code, "message": exc.message},
+        )
+
+    @app.get("/health", tags=["service"], summary="Проверка живости")
+    async def health() -> dict[str, str]:
+        """Отвечает, пока процесс жив. Используется Docker и мониторингом."""
+        return {"status": "ok"}
+
+    app.include_router(payments_router)
+    return app
+
+
+app = create_app()
