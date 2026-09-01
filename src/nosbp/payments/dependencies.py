@@ -1,5 +1,6 @@
 """Зависимости FastAPI для эндпоинтов генерации QR."""
 
+import datetime
 from typing import Annotated
 
 from fastapi import Depends, Request
@@ -7,7 +8,11 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from nosbp.core.config import Settings, get_settings
-from nosbp.core.errors import InvalidTokenError, OrganizationNotFoundError
+from nosbp.core.errors import (
+    AccountDisabledError,
+    InvalidTokenError,
+    OrganizationNotFoundError,
+)
 from nosbp.db.base import utcnow
 from nosbp.db.models import Account, ApiToken, Organization
 from nosbp.db.session import get_db
@@ -27,12 +32,30 @@ def get_logo_cache(request: Request) -> LogoCache:
 LogoCacheDep = Annotated[LogoCache, Depends(get_logo_cache)]
 
 
-async def authenticate(session: AsyncSession, token: str) -> Account:
+def _should_refresh_last_used(
+    api_token: ApiToken, now: datetime.datetime, throttle_seconds: int
+) -> bool:
+    """Пора ли обновлять отметку последнего использования ключа.
+
+    Обновлять её на каждом запросе — значит писать в базу даже там, где
+    деньги не двигаются и записи быть не должно. Точность до секунды
+    в кабинете никому не нужна, поэтому запись прореживается.
+    """
+    if api_token.last_used_at is None:
+        return True
+    elapsed = now - api_token.last_used_at
+    return elapsed >= datetime.timedelta(seconds=throttle_seconds)
+
+
+async def authenticate(
+    session: AsyncSession, token: str, *, settings: Settings
+) -> Account:
     """Находит аккаунт по токену.
 
     Сравнение идёт по хэшу: сам токен в базе не хранится.
 
-    :raises InvalidTokenError: токен не найден, отозван либо аккаунт отключён.
+    :raises InvalidTokenError: ключ не найден или отозван.
+    :raises AccountDisabledError: аккаунт отключён оператором сервиса.
     """
     result = await session.execute(
         select(ApiToken).where(ApiToken.token_hash == hash_token(token))
@@ -43,12 +66,21 @@ async def authenticate(session: AsyncSession, token: str) -> Account:
         raise InvalidTokenError("Ключ не найден или отозван.")
 
     account = await session.get(Account, api_token.account_id)
-    if account is None or not account.is_active:
-        raise InvalidTokenError("Аккаунт отключён.")
+    if account is None:
+        raise InvalidTokenError("Ключ не найден или отозван.")
+    if not account.is_active:
+        raise AccountDisabledError(
+            "Аккаунт отключён. Напишите в поддержку, чтобы разобраться."
+        )
 
     # Отметка последнего использования нужна заказчику в кабинете:
     # по ней видно, какой из ключей ещё работает, а какой можно отозвать.
-    api_token.last_used_at = utcnow()
+    now = utcnow()
+    if _should_refresh_last_used(
+        api_token, now, settings.token_last_used_throttle_seconds
+    ):
+        api_token.last_used_at = now
+
     return account
 
 
@@ -71,13 +103,14 @@ async def resolve_organization(
     result = await session.execute(query)
     organization = result.scalars().first()
 
-    if organization is None:
-        if alias is not None:
-            raise OrganizationNotFoundError(
-                f"Организация «{alias}» не найдена. Проверьте параметр org."
-            )
+    if organization is not None:
+        return organization
+
+    if alias is not None:
         raise OrganizationNotFoundError(
-            "У аккаунта нет организации по умолчанию. Укажите параметр org "
-            "или отметьте одну из организаций основной."
+            f"Организация «{alias}» не найдена. Проверьте параметр org."
         )
-    return organization
+    raise OrganizationNotFoundError(
+        "У аккаунта нет организации по умолчанию. Укажите параметр org "
+        "или отметьте одну из организаций основной."
+    )

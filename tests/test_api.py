@@ -417,3 +417,71 @@ async def test_payer_data_is_never_stored(client, merchant, session):
     assert "Иванов" not in stored
     assert "Пётр" not in stored
     assert "79001234567" not in stored
+
+
+# ---------------------------------------------------------------------------
+# Отметка использования ключа
+# ---------------------------------------------------------------------------
+
+
+async def test_first_request_marks_token_as_used(client, merchant, session):
+    from nosbp.db.models import ApiToken
+
+    account, _, token = merchant
+    await client.get(qr_url(token, sum=4242))
+
+    api_token = (
+        await session.execute(select(ApiToken).where(ApiToken.account_id == account.id))
+    ).scalar_one()
+    assert api_token.last_used_at is not None
+
+
+async def test_token_usage_mark_is_throttled(client, merchant, session):
+    """Отметка не должна переписываться на каждом запросе.
+
+    Иначе быстрый путь, который создавался ради того, чтобы не писать
+    в базу, всё равно писал бы — на каждое открытие письма.
+    """
+    import datetime
+
+    from nosbp.db.models import ApiToken
+
+    account, _, token = merchant
+    url = qr_url(token, sum=4343)
+
+    await client.get(url)
+    api_token = (
+        await session.execute(select(ApiToken).where(ApiToken.account_id == account.id))
+    ).scalar_one()
+    first_seen = api_token.last_used_at
+    assert first_seen is not None
+
+    await client.get(url)
+    await session.refresh(api_token)
+    assert api_token.last_used_at == first_seen
+
+    # Отматываем отметку назад — и следующий запрос обновляет её снова.
+    api_token.last_used_at = first_seen - datetime.timedelta(days=1)
+    await session.commit()
+
+    await client.get(url)
+    await session.refresh(api_token)
+    assert api_token.last_used_at > first_seen
+
+
+async def test_disabled_account_reports_its_own_error(client, merchant, session):
+    """Отключённый аккаунт — не то же самое, что кончившиеся деньги."""
+    account, _, token = merchant
+    account.is_active = False
+    await session.commit()
+
+    response = await client.get(qr_url(token, on_error="status"))
+    assert response.status_code == 403
+    assert response.json()["error"] == "account_disabled"
+
+
+async def test_unknown_on_error_value_is_rejected(client, merchant):
+    """Значения параметра ограничены перечислением, а не свободной строкой."""
+    _, _, token = merchant
+    response = await client.get(qr_url(token, on_error="whatever"))
+    assert response.status_code == 422

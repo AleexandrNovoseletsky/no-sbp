@@ -21,6 +21,7 @@ from sqlalchemy import (
     DateTime,
     Enum,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
@@ -28,7 +29,33 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from nosbp.core.constants import (
+    ACCOUNT_LENGTH,
+    ALIAS_MAX_LENGTH,
+    BANK_NAME_MAX_LENGTH,
+    BIC_LENGTH,
+    DEFAULT_QR_COLOR,
+    DISPLAY_NAME_MAX_LENGTH,
+    EMAIL_MAX_LENGTH,
+    INN_LENGTHS,
+    KPP_LENGTH,
+    NAME_MAX_LENGTH,
+    PASSWORD_HASH_MAX_LENGTH,
+    PUBLIC_TOKEN_MAX_LENGTH,
+    QR_COLOR_LENGTH,
+    SHA256_HEX_LENGTH,
+    STORAGE_KEY_MAX_LENGTH,
+    TOKEN_LABEL_MAX_LENGTH,
+    TOKEN_PREFIX_LENGTH,
+)
 from nosbp.db.base import Base, created_at_column, utcnow, uuid_pk
+
+MAX_INN_LENGTH = max(INN_LENGTHS)
+"""Колонка рассчитана на самый длинный вариант — ИНН физлица и ИП."""
+
+
+ENTRY_TYPE_MAX_LENGTH = 16
+"""Длина колонки под название типа операции."""
 
 
 class LedgerEntryType(enum.StrEnum):
@@ -53,9 +80,13 @@ class Account(Base):
     __tablename__ = "accounts"
 
     id: Mapped[uuid.UUID] = uuid_pk()
-    email: Mapped[str] = mapped_column(String(320), unique=True, index=True)
-    password_hash: Mapped[str | None] = mapped_column(String(255), default=None)
-    display_name: Mapped[str] = mapped_column(String(160))
+    email: Mapped[str] = mapped_column(
+        String(EMAIL_MAX_LENGTH), unique=True, index=True
+    )
+    password_hash: Mapped[str | None] = mapped_column(
+        String(PASSWORD_HASH_MAX_LENGTH), default=None
+    )
+    display_name: Mapped[str] = mapped_column(String(DISPLAY_NAME_MAX_LENGTH))
 
     balance_kopecks: Mapped[int] = mapped_column(BigInteger, default=0)
     """Кэш текущего баланса.
@@ -114,7 +145,7 @@ class Organization(Base):
         ForeignKey("accounts.id", ondelete="CASCADE"), index=True
     )
 
-    alias: Mapped[str] = mapped_column(String(64))
+    alias: Mapped[str] = mapped_column(String(ALIAS_MAX_LENGTH))
     """Короткое имя для параметра запроса (``?org=main``).
 
     Используется вместо UUID, чтобы ссылка в шаблоне CRM оставалась читаемой
@@ -122,19 +153,23 @@ class Organization(Base):
     """
 
     # ---- Реквизиты по ГОСТ Р 56042-2014 --------------------------------
-    name: Mapped[str] = mapped_column(String(160))
-    personal_acc: Mapped[str] = mapped_column(String(20))
-    bank_name: Mapped[str] = mapped_column(String(45))
-    bic: Mapped[str] = mapped_column(String(9))
-    corresp_acc: Mapped[str] = mapped_column(String(20))
-    payee_inn: Mapped[str] = mapped_column(String(12))
-    kpp: Mapped[str | None] = mapped_column(String(9), default=None)
+    name: Mapped[str] = mapped_column(String(NAME_MAX_LENGTH))
+    personal_acc: Mapped[str] = mapped_column(String(ACCOUNT_LENGTH))
+    bank_name: Mapped[str] = mapped_column(String(BANK_NAME_MAX_LENGTH))
+    bic: Mapped[str] = mapped_column(String(BIC_LENGTH))
+    corresp_acc: Mapped[str] = mapped_column(String(ACCOUNT_LENGTH))
+    payee_inn: Mapped[str] = mapped_column(String(MAX_INN_LENGTH))
+    kpp: Mapped[str | None] = mapped_column(String(KPP_LENGTH), default=None)
 
     # ---- Оформление ----------------------------------------------------
-    logo_key: Mapped[str | None] = mapped_column(String(255), default=None)
+    logo_key: Mapped[str | None] = mapped_column(
+        String(STORAGE_KEY_MAX_LENGTH), default=None
+    )
     """Ключ файла логотипа в объектном хранилище."""
 
-    qr_color: Mapped[str] = mapped_column(String(7), default="#000000")
+    qr_color: Mapped[str] = mapped_column(
+        String(QR_COLOR_LENGTH), default=DEFAULT_QR_COLOR
+    )
     """Цвет модулей QR-кода в формате ``#RRGGBB``.
 
     Фон всегда остаётся белым: прозрачный или светлый фон на тёмной подложке
@@ -170,12 +205,14 @@ class ApiToken(Base):
         ForeignKey("accounts.id", ondelete="CASCADE"), index=True
     )
 
-    token_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
-    prefix: Mapped[str] = mapped_column(String(12))
+    token_hash: Mapped[str] = mapped_column(
+        String(SHA256_HEX_LENGTH), unique=True, index=True
+    )
+    prefix: Mapped[str] = mapped_column(String(TOKEN_PREFIX_LENGTH))
     """Первые символы токена открытым текстом — чтобы заказчик узнавал ключ
     в списке, не видя его целиком."""
 
-    label: Mapped[str] = mapped_column(String(80), default="")
+    label: Mapped[str] = mapped_column(String(TOKEN_LABEL_MAX_LENGTH), default="")
     """Человеческое имя: «RetailCRM», «Сайт», «1С»."""
 
     last_used_at: Mapped[datetime.datetime | None] = mapped_column(
@@ -220,14 +257,18 @@ class Invoice(Base):
         ForeignKey("organizations.id", ondelete="CASCADE"), index=True
     )
 
-    idempotency_key: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    idempotency_key: Mapped[str] = mapped_column(
+        String(SHA256_HEX_LENGTH), unique=True, index=True
+    )
     """SHA-256 от нормализованных параметров запроса.
 
     В него входят и персональные данные плательщика — но только в виде
     вклада в хэш. Сами значения не сохраняются нигде.
     """
 
-    public_token: Mapped[str] = mapped_column(String(32), unique=True, index=True)
+    public_token: Mapped[str] = mapped_column(
+        String(PUBLIC_TOKEN_MAX_LENGTH), unique=True, index=True
+    )
     """Короткий идентификатор для ссылок вида ``/pay/{token}``."""
 
     sum_kopecks: Mapped[int | None] = mapped_column(BigInteger, default=None)
@@ -268,7 +309,18 @@ class LedgerEntry(Base):
     """
 
     __tablename__ = "ledger_entries"
-    __table_args__ = (CheckConstraint("amount_kopecks <> 0", name="amount_not_zero"),)
+    __table_args__ = (
+        CheckConstraint("amount_kopecks <> 0", name="amount_not_zero"),
+        # Под запрос суточного лимита: он выполняется перед каждым
+        # списанием и без составного индекса вырождается в перебор
+        # всех операций аккаунта за всё время.
+        Index(
+            "ix_ledger_entries_account_type_created",
+            "account_id",
+            "entry_type",
+            "created_at",
+        ),
+    )
 
     id: Mapped[uuid.UUID] = uuid_pk()
     account_id: Mapped[uuid.UUID] = mapped_column(
@@ -282,7 +334,12 @@ class LedgerEntry(Base):
         # native_enum=False — тип хранится как VARCHAR с CHECK, а не как
         # отдельный тип PostgreSQL: добавить новое значение потом можно
         # обычной миграцией, без ALTER TYPE.
-        Enum(LedgerEntryType, native_enum=False, length=16, validate_strings=True)
+        Enum(
+            LedgerEntryType,
+            native_enum=False,
+            length=ENTRY_TYPE_MAX_LENGTH,
+            validate_strings=True,
+        )
     )
     amount_kopecks: Mapped[int] = mapped_column(BigInteger)
     """Сумма со знаком: пополнение положительное, списание отрицательное."""

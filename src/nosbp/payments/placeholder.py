@@ -1,8 +1,8 @@
 """Картинка-заглушка вместо ошибки.
 
 QR-код живёт в теге ``<img>`` внутри уже отправленного письма. Если сервис
-ответит кодом 402, получатель увидит битую иконку и не поймёт, что делать,
-а заказчик об этом даже не узнает.
+ответит кодом ошибки, получатель увидит битую иконку и не поймёт, что
+делать, а заказчик об этом даже не узнает.
 
 Поэтому на GET-запросах ошибка по умолчанию отдаётся картинкой с понятным
 текстом. Машиночитаемый код при этом уезжает в заголовок ``X-NoSBP-Error``.
@@ -11,16 +11,34 @@ QR-код живёт в теге ``<img>`` внутри уже отправле�
 from functools import lru_cache
 from io import BytesIO
 from pathlib import Path
+from typing import Final
 
 from PIL import Image, ImageDraw, ImageFont
 
-WIDTH = 420
-HEIGHT = 420
-BACKGROUND = (255, 255, 255)
-BORDER_COLOR = (200, 205, 203)
-TEXT_COLOR = (120, 60, 40)
+AnyFont = ImageFont.FreeTypeFont | ImageFont.ImageFont
 
-FONT_CANDIDATES = (
+WIDTH: Final = 420
+HEIGHT: Final = 420
+"""Размер картинки в пикселях — примерно как QR-код при обычном масштабе,
+чтобы вёрстка письма не поехала."""
+
+BACKGROUND: Final[tuple[int, int, int]] = (255, 255, 255)
+BORDER_COLOR: Final[tuple[int, int, int]] = (200, 205, 203)
+TEXT_COLOR: Final[tuple[int, int, int]] = (120, 60, 40)
+
+BORDER_INSET: Final = 6
+"""Отступ рамки от края картинки."""
+
+BORDER_WIDTH: Final = 2
+
+FONT_SIZE: Final = 18
+LINE_HEIGHT: Final = 26
+TEXT_MARGIN: Final = 32
+"""Отступ текста от боковых краёв. Ограничивает ширину строки при переносе."""
+
+FONT_CACHE_SIZE: Final = 4
+
+FONT_CANDIDATES: Final[tuple[str, ...]] = (
     "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
     "/usr/share/fonts/TTF/DejaVuSans.ttf",
     "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
@@ -34,34 +52,47 @@ FONT_CANDIDATES = (
 """
 
 
-@lru_cache(maxsize=4)
-def _load_font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
-    """Находит первый доступный шрифт с кириллицей."""
+@lru_cache(maxsize=FONT_CACHE_SIZE)
+def _load_font(size: int) -> AnyFont:
+    """Находит первый доступный шрифт с кириллицей.
+
+    Результат кэшируется: разбор файла шрифта на каждой ошибке — заметная
+    трата на пути, который и так возникает в неудачный момент.
+    """
     for candidate in FONT_CANDIDATES:
-        if Path(candidate).exists():
-            try:
-                return ImageFont.truetype(candidate, size)
-            except OSError:
-                continue
-    # Крайний случай: шрифта в системе нет. Текст будет латиницей,
-    # но картинка всё равно отрисуется и не сломает вёрстку письма.
+        path = Path(candidate)
+        if not path.exists():
+            continue
+        try:
+            return ImageFont.truetype(path, size)
+        except OSError:
+            continue
+    # Крайний случай: подходящего шрифта в системе нет. Текст выйдет
+    # латиницей, но картинка отрисуется и не сломает вёрстку письма.
     return ImageFont.load_default()
 
 
-def _wrap(text: str, limit: int) -> list[str]:
-    """Разбивает текст на строки не длиннее ``limit`` символов."""
+def _wrap(
+    text: str, *, draw: ImageDraw.ImageDraw, font: AnyFont, max_width: int
+) -> tuple[str, ...]:
+    """Разбивает текст на строки, помещающиеся в заданную ширину.
+
+    Перенос по реальной ширине текста, а не по числу символов: в кириллице
+    и латинице символы разной ширины, и счёт по символам давал бы то
+    обрезанные, то полупустые строки.
+    """
     lines: list[str] = []
     current = ""
     for word in text.split():
         candidate = f"{current} {word}".strip()
-        if len(candidate) > limit and current:
+        if current and draw.textlength(candidate, font=font) > max_width:
             lines.append(current)
             current = word
         else:
             current = candidate
     if current:
         lines.append(current)
-    return lines
+    return tuple(lines)
 
 
 def render_placeholder_png(message: str) -> bytes:
@@ -71,16 +102,27 @@ def render_placeholder_png(message: str) -> bytes:
     """
     image = Image.new("RGB", (WIDTH, HEIGHT), BACKGROUND)
     draw = ImageDraw.Draw(image)
-    draw.rectangle((6, 6, WIDTH - 7, HEIGHT - 7), outline=BORDER_COLOR, width=2)
+    draw.rectangle(
+        (
+            BORDER_INSET,
+            BORDER_INSET,
+            WIDTH - BORDER_INSET - 1,
+            HEIGHT - BORDER_INSET - 1,
+        ),
+        outline=BORDER_COLOR,
+        width=BORDER_WIDTH,
+    )
 
-    font = _load_font(18)
-    lines = _wrap(message, limit=32)
+    font = _load_font(FONT_SIZE)
+    lines = _wrap(message, draw=draw, font=font, max_width=WIDTH - 2 * TEXT_MARGIN)
 
-    line_height = 26
-    start_y = (HEIGHT - len(lines) * line_height) // 2
+    # Обе величины постоянны для всех строк — считаем их до цикла.
+    centre_x = WIDTH // 2
+    start_y = (HEIGHT - len(lines) * LINE_HEIGHT) // 2
+
     for index, line in enumerate(lines):
         draw.text(
-            (WIDTH // 2, start_y + index * line_height),
+            (centre_x, start_y + index * LINE_HEIGHT),
             line,
             font=font,
             fill=TEXT_COLOR,

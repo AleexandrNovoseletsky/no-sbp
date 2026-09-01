@@ -9,13 +9,14 @@
   повторные открытия письма, предзагрузка картинок почтовым клиентом,
   превью в CRM;
 * **медленный** — счёта нет или он «протух». Аккаунт блокируется,
-  списывается рубль, счёт создаётся или продлевается.
+  списывается стоимость счёта, счёт создаётся или продлевается.
 """
 
 import datetime
 import secrets
 import uuid
 from dataclasses import dataclass
+from typing import Final
 
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -27,8 +28,15 @@ from nosbp.db.models import Account, Invoice, Organization
 from nosbp.payments.idempotency import build_idempotency_key
 from nosbp.payments.schemas import PaymentRequest
 
-PUBLIC_TOKEN_BYTES = 9
+PUBLIC_TOKEN_BYTES: Final = 9
 """Длина публичного идентификатора счёта: 12 символов после base64."""
+
+COMMENT_NEW_INVOICE: Final[str] = "Генерация счёта"
+COMMENT_RENEWED_INVOICE: Final[str] = (
+    "Повторная генерация счёта после бесплатного периода"
+)
+"""Тексты попадают в выписку заказчика, поэтому вынесены из кода наружу:
+менять их придётся согласованно с документацией."""
 
 
 @dataclass(frozen=True)
@@ -82,8 +90,8 @@ class InvoiceService:
         """Отмечает обращение к живому счёту одним запросом к базе.
 
         Проверка «счёт существует и не истёк» и увеличение счётчика
-        обращений выполняются одним UPDATE ... RETURNING: так между
-        проверкой и записью не может вклиниться другой запрос.
+        обращений выполняются одним UPDATE ... RETURNING: между проверкой
+        и записью не может вклиниться другой запрос.
         """
         statement = (
             update(Invoice)
@@ -113,10 +121,10 @@ class InvoiceService:
         # оба уйдут сюда, но второй дождётся первого и увидит готовый счёт.
         locked_account = await self._billing.lock_account(account.id)
 
-        expired = await self._session.execute(
+        found = await self._session.execute(
             select(Invoice).where(Invoice.idempotency_key == key)
         )
-        invoice = expired.scalar_one_or_none()
+        invoice = found.scalar_one_or_none()
 
         if invoice is not None and invoice.is_free_period_active(now):
             # Пока мы ждали блокировку, счёт создал параллельный запрос.
@@ -129,25 +137,19 @@ class InvoiceService:
         )
 
         if invoice is None:
-            invoice = Invoice(
+            invoice = await self._create(
                 account_id=locked_account.id,
                 organization_id=organization.id,
-                idempotency_key=key,
-                public_token=secrets.token_urlsafe(PUBLIC_TOKEN_BYTES),
-                sum_kopecks=payment.sum_kopecks,
-                purpose=payment.purpose,
-                charge_count=0,
-                hit_count=0,
+                payment=payment,
+                key=key,
+                now=now,
                 expires_at=expires_at,
-                last_seen_at=now,
             )
-            self._session.add(invoice)
-            await self._session.flush()
-            comment = "Генерация счёта"
+            comment = COMMENT_NEW_INVOICE
         else:
             # Бесплатный период истёк — счёт тарифицируется заново.
             invoice.expires_at = expires_at
-            comment = "Повторная генерация счёта после бесплатного периода"
+            comment = COMMENT_RENEWED_INVOICE
 
         invoice.charge_count += 1
         invoice.hit_count += 1
@@ -158,6 +160,37 @@ class InvoiceService:
         )
         return InvoiceResolution(invoice=invoice, charged=True)
 
+    async def _create(
+        self,
+        *,
+        account_id: uuid.UUID,
+        organization_id: uuid.UUID,
+        payment: PaymentRequest,
+        key: str,
+        now: datetime.datetime,
+        expires_at: datetime.datetime,
+    ) -> Invoice:
+        """Создаёт запись счёта и сразу получает её идентификатор.
+
+        Идентификатор нужен до коммита: на него ссылается запись журнала
+        списания, которая пишется в той же транзакции.
+        """
+        invoice = Invoice(
+            account_id=account_id,
+            organization_id=organization_id,
+            idempotency_key=key,
+            public_token=secrets.token_urlsafe(PUBLIC_TOKEN_BYTES),
+            sum_kopecks=payment.sum_kopecks,
+            purpose=payment.purpose,
+            charge_count=0,
+            hit_count=0,
+            expires_at=expires_at,
+            last_seen_at=now,
+        )
+        self._session.add(invoice)
+        await self._session.flush()
+        return invoice
+
 
 async def get_invoice_by_public_token(
     session: AsyncSession, public_token: str
@@ -167,10 +200,3 @@ async def get_invoice_by_public_token(
         select(Invoice).where(Invoice.public_token == public_token)
     )
     return result.scalar_one_or_none()
-
-
-async def get_invoice_by_id(
-    session: AsyncSession, invoice_id: uuid.UUID
-) -> Invoice | None:
-    """Находит счёт по внутреннему идентификатору."""
-    return await session.get(Invoice, invoice_id)

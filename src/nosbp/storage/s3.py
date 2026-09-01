@@ -6,7 +6,7 @@
 настоящей асинхронности здесь нулевой.
 """
 
-from typing import Any
+from typing import Any, Final
 
 import boto3
 from anyio import to_thread
@@ -15,6 +15,14 @@ from botocore.exceptions import ClientError
 
 from nosbp.core.config import Settings
 from nosbp.storage.base import Storage
+
+MISSING_OBJECT_CODES: Final[frozenset[str]] = frozenset({"NoSuchKey", "404"})
+"""Коды, которыми S3 сообщает, что файла просто нет.
+
+Это не ошибка: у организации может не быть логотипа.
+"""
+
+SIGNATURE_VERSION: Final[str] = "s3v4"
 
 
 class S3Storage(Storage):
@@ -28,7 +36,14 @@ class S3Storage(Storage):
             region_name=settings.s3_region,
             aws_access_key_id=settings.s3_access_key,
             aws_secret_access_key=settings.s3_secret_key,
-            config=Config(signature_version="s3v4", retries={"max_attempts": 3}),
+            config=Config(
+                signature_version=SIGNATURE_VERSION,
+                # Без таймаутов зависшее хранилище держит поток бесконечно,
+                # и пул потоков кончается вместе со способностью отвечать.
+                connect_timeout=settings.s3_connect_timeout_seconds,
+                read_timeout=settings.s3_read_timeout_seconds,
+                retries={"max_attempts": settings.s3_max_attempts},
+            ),
         )
 
     async def put(self, key: str, data: bytes, *, content_type: str) -> None:
@@ -53,9 +68,7 @@ class S3Storage(Storage):
         try:
             response = self._client.get_object(Bucket=self._bucket, Key=key)
         except ClientError as exc:
-            # Отсутствующий файл — это не ошибка, а штатная ситуация:
-            # у организации может просто не быть логотипа.
-            if exc.response.get("Error", {}).get("Code") in {"NoSuchKey", "404"}:
+            if exc.response.get("Error", {}).get("Code") in MISSING_OBJECT_CODES:
                 return None
             raise
         body: bytes = response["Body"].read()

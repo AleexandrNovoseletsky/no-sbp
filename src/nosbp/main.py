@@ -2,12 +2,14 @@
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from importlib.metadata import PackageNotFoundError, version
+from typing import Final
 
 import structlog
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
-from nosbp.core.config import get_settings
+from nosbp.core.config import Settings, get_settings
 from nosbp.core.errors import NosbpError
 from nosbp.core.logging import configure_logging
 from nosbp.db.session import dispose_engine
@@ -16,6 +18,42 @@ from nosbp.storage.logo_cache import LogoCache
 from nosbp.storage.s3 import S3Storage
 
 log = structlog.get_logger()
+
+PACKAGE_NAME: Final[str] = "nosbp"
+FALLBACK_VERSION: Final[str] = "0.0.0"
+
+TITLE: Final[str] = "NoSBP"
+DESCRIPTION: Final[str] = (
+    "Генерация QR-кодов для оплаты по банковским реквизитам по ГОСТ Р 56042-2014."
+)
+
+
+def get_version() -> str:
+    """Берёт версию из метаданных установленного пакета.
+
+    Так номер версии живёт в одном месте — в pyproject.toml — и не
+    расходится с тем, что показывает документация API.
+    """
+    try:
+        return version(PACKAGE_NAME)
+    except PackageNotFoundError:
+        # Пакет запущен из исходников без установки — например, в редакторе.
+        return FALLBACK_VERSION
+
+
+def build_logo_cache(app: FastAPI, settings: Settings) -> LogoCache:
+    """Собирает кэш логотипов поверх хранилища приложения.
+
+    Хранилище может быть подставлено заранее — так тесты работают
+    с памятью вместо сети.
+    """
+    if not hasattr(app.state, "storage"):
+        app.state.storage = S3Storage(settings)
+    return LogoCache(
+        app.state.storage,
+        ttl_seconds=settings.logo_cache_ttl_seconds,
+        max_entries=settings.logo_cache_max_entries,
+    )
 
 
 @asynccontextmanager
@@ -27,11 +65,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     с миграциями, и на проде это обнаружится в худший момент.
     """
     settings = get_settings()
-
-    # Тесты подставляют своё хранилище до старта, чтобы не ходить в сеть.
-    if not hasattr(app.state, "storage"):
-        app.state.storage = S3Storage(settings)
-    app.state.logo_cache = LogoCache(app.state.storage)
+    app.state.logo_cache = build_logo_cache(app, settings)
 
     log.info("service_started", environment=settings.environment)
     yield
@@ -49,12 +83,9 @@ def create_app() -> FastAPI:
     configure_logging(json_logs=not settings.is_local, log_level=settings.log_level)
 
     app = FastAPI(
-        title="NoSBP",
-        description=(
-            "Генерация QR-кодов для оплаты по банковским реквизитам "
-            "по ГОСТ Р 56042-2014."
-        ),
-        version="0.2.0",
+        title=TITLE,
+        description=DESCRIPTION,
+        version=get_version(),
         lifespan=lifespan,
     )
 

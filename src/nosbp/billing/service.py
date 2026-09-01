@@ -1,13 +1,15 @@
 """Тарификация: баланс, списания, овердрафт.
 
-Правила, зафиксированные с заказчиком:
+Правила задаются настройками, а не зашиты в код:
 
-* один сгенерированный счёт стоит один рубль;
-* повторное обращение к тому же счёту в течение 30 дней бесплатно
-  (это обеспечивает :mod:`nosbp.payments.idempotency`, не этот модуль);
-* при исчерпании баланса сервис работает в долг три дня — без ограничения
-  по сумме, чтобы кассовый разрыв у заказчика не останавливал его продажи;
-* овердрафт можно продлить из кабинета ещё на три дня.
+* стоимость одного счёта — :attr:`Settings.invoice_price_kopecks`;
+* длительность бесплатного периода — :attr:`Settings.invoice_free_period_days`
+  (её обеспечивает :mod:`nosbp.invoices.service`, не этот модуль);
+* сколько дней сервис работает в долг после исчерпания баланса —
+  :attr:`Settings.overdraft_days`, ограничения по сумме при этом нет:
+  кассовый разрыв у заказчика не должен останавливать его продажи;
+* продление овердрафта — :attr:`Settings.overdraft_extension_days`
+  и :attr:`Settings.overdraft_max_extensions`.
 
 Баланс — это журнал операций. Колонка ``Account.balance_kopecks`` только
 кэширует его текущее значение и обновляется в той же транзакции.
@@ -16,19 +18,42 @@
 import datetime
 import uuid
 from dataclasses import dataclass
+from typing import Final
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from nosbp.core.config import Settings
 from nosbp.core.errors import (
+    AccountDisabledError,
     DailyLimitExceededError,
     InsufficientFundsError,
-    NosbpError,
+    OverdraftExtensionLimitError,
+    OverdraftNotActiveError,
     ValidationError,
 )
+from nosbp.core.money import format_roubles
 from nosbp.db.base import utcnow
 from nosbp.db.models import Account, LedgerEntry, LedgerEntryType
+
+DATE_FORMAT: Final[str] = "%d.%m.%Y"
+"""Формат даты в сообщениях заказчику."""
+
+
+def day_start(now: datetime.datetime, timezone_name: str) -> datetime.datetime:
+    """Начало текущих суток в заданном часовом поясе, выраженное в UTC.
+
+    Считать сутки по UTC нельзя: для московского заказчика суточный лимит
+    сбрасывался бы в три часа ночи, а для тех, кто восточнее, — посреди
+    рабочего дня.
+
+    :param now: момент времени с часовым поясом.
+    :param timezone_name: имя пояса из базы IANA, например ``Europe/Moscow``.
+    """
+    local_now = now.astimezone(ZoneInfo(timezone_name))
+    local_midnight = local_now.replace(hour=0, minute=0, second=0, microsecond=0)
+    return local_midnight.astimezone(datetime.UTC)
 
 
 @dataclass(frozen=True)
@@ -38,20 +63,6 @@ class SpendDecision:
     allowed: bool
     starts_overdraft: bool = False
     reason: str = ""
-
-
-class OverdraftNotActiveError(NosbpError):
-    """Попытка продлить овердрафт, которого нет."""
-
-    status_code = 409
-    code = "overdraft_not_active"
-
-
-class OverdraftExtensionLimitError(NosbpError):
-    """Исчерпан лимит продлений овердрафта."""
-
-    status_code = 409
-    code = "overdraft_extension_limit"
 
 
 class BillingService:
@@ -70,7 +81,7 @@ class BillingService:
 
         Блокировка сериализует денежные операции по одному аккаунту:
         два одновременных запроса не смогут дважды прочитать один и тот же
-        баланс и списать с него по рублю, оставив итог неверным.
+        баланс и списать с него, оставив итог неверным.
 
         На горячем пути (повтор уже существующего счёта) блокировка
         не берётся вовсе — там деньги не двигаются.
@@ -88,7 +99,7 @@ class BillingService:
         self,
         account: Account,
         *,
-        invoice_id: uuid.UUID,
+        invoice_id: uuid.UUID | None,
         amount_kopecks: int | None = None,
         comment: str = "",
     ) -> LedgerEntry:
@@ -97,6 +108,11 @@ class BillingService:
         Вызывается только когда аккаунт уже заблокирован через
         :meth:`lock_account`.
 
+        :param invoice_id: счёт, за который списываем. None допустим только
+            в тестах и при служебных списаниях без привязки к счёту.
+        :param amount_kopecks: сумма списания. По умолчанию берётся
+            из настроек.
+        :raises AccountDisabledError: аккаунт отключён оператором.
         :raises InsufficientFundsError: баланс исчерпан и овердрафт закончился.
         :raises DailyLimitExceededError: превышен суточный потолок списаний.
         """
@@ -133,9 +149,12 @@ class BillingService:
 
         :raises ValidationError: если сумма меньше минимальной.
         """
-        if amount_kopecks < self._settings.min_topup_kopecks:
-            minimum = self._settings.min_topup_kopecks / 100
-            raise ValidationError(f"Минимальная сумма пополнения — {minimum:.0f} ₽.")
+        minimum = self._settings.min_topup_kopecks
+        if amount_kopecks < minimum:
+            raise ValidationError(
+                "Минимальная сумма пополнения — "
+                f"{format_roubles(minimum, fractional=False)}."
+            )
         return self._append_entry(
             account,
             entry_type=LedgerEntryType.TOPUP,
@@ -193,10 +212,13 @@ class BillingService:
         """
         if account.overdraft_until is None:
             raise OverdraftNotActiveError("Овердрафт не активен — продлевать нечего.")
-        if account.overdraft_extensions_used >= self._settings.overdraft_max_extensions:
+
+        allowed_extensions = self._settings.overdraft_max_extensions
+        if account.overdraft_extensions_used >= allowed_extensions:
             raise OverdraftExtensionLimitError(
                 "Лимит продлений исчерпан. Пополните баланс, чтобы продолжить работу."
             )
+
         account.overdraft_until += datetime.timedelta(
             days=self._settings.overdraft_extension_days
         )
@@ -210,9 +232,15 @@ class BillingService:
     def _evaluate_spend(
         self, account: Account, amount: int, now: datetime.datetime
     ) -> SpendDecision:
-        """Решает, разрешено ли списание."""
+        """Решает, разрешено ли списание.
+
+        :raises AccountDisabledError: аккаунт отключён — это не про деньги,
+            и пополнение баланса ничего не изменит.
+        """
         if not account.is_active:
-            return SpendDecision(allowed=False, reason="Аккаунт отключён.")
+            raise AccountDisabledError(
+                "Аккаунт отключён. Напишите в поддержку, чтобы разобраться."
+            )
 
         if account.balance_kopecks - amount >= 0:
             return SpendDecision(allowed=True)
@@ -228,7 +256,7 @@ class BillingService:
             allowed=False,
             reason=(
                 "Баланс исчерпан, срок работы в долг истёк "
-                f"{account.overdraft_until:%d.%m.%Y}. Пополните баланс."
+                f"{account.overdraft_until:{DATE_FORMAT}}. Пополните баланс."
             ),
         )
 
@@ -238,25 +266,29 @@ class BillingService:
         """Проверяет суточный потолок списаний.
 
         Потолок защищает от единственного реального сценария утечки ключа:
-        злоумышленник не может украсть деньги, но может выжечь баланс,
-        генерируя счета с разными параметрами.
+        украсть деньги нельзя, но можно выжечь баланс, генерируя счета
+        с разными параметрами.
+
+        :raises DailyLimitExceededError: если потолок исчерпан.
         """
         limit = account.daily_charge_limit_kopecks
         if limit is None:
             return
 
-        day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
         result = await self._session.execute(
             select(func.coalesce(func.sum(-LedgerEntry.amount_kopecks), 0)).where(
                 LedgerEntry.account_id == account.id,
                 LedgerEntry.entry_type == LedgerEntryType.CHARGE,
-                LedgerEntry.created_at >= day_start,
+                LedgerEntry.created_at
+                >= day_start(now, self._settings.billing_day_timezone),
             )
         )
         spent_today = int(result.scalar_one())
+
         if spent_today + amount > limit:
             raise DailyLimitExceededError(
-                f"Превышен суточный лимит списаний ({limit / 100:.0f} ₽). "
+                "Превышен суточный лимит списаний "
+                f"({format_roubles(limit, fractional=False)}). "
                 "Проверьте, не используется ли ваш ключ посторонними."
             )
 
@@ -294,8 +326,8 @@ async def calculate_balance_from_ledger(
 ) -> int:
     """Считает баланс суммированием журнала.
 
-    Источник истины для сверки: колонка ``Account.balance_kopecks`` — лишь
-    кэш, и тест проверяет, что она не разошлась с журналом.
+    Журнал — источник истины; колонка ``Account.balance_kopecks`` лишь
+    кэширует результат, и тест проверяет, что они не разошлись.
     """
     result = await session.execute(
         select(func.coalesce(func.sum(LedgerEntry.amount_kopecks), 0)).where(

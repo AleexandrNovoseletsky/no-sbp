@@ -10,9 +10,12 @@
 
 import hashlib
 import secrets
+from typing import Final
 
-TOKEN_BYTES = 32
-PREFIX_LENGTH = 8
+from nosbp.core.constants import TOKEN_PREFIX_LENGTH
+
+TOKEN_BYTES: Final = 32
+"""Длина токена в байтах до кодирования в base64."""
 
 
 def generate_token() -> str:
@@ -26,5 +29,5 @@ def hash_token(token: str) -> str:
 
 
 def token_prefix(token: str) -> str:
-    """Первые символы токена, которые можно показывать в списке ключей."""
-    return token[:PREFIX_LENGTH]
+    """Возвращает открытую часть токена для показа в списке ключей."""
+    return token[:TOKEN_PREFIX_LENGTH]

@@ -1,6 +1,22 @@
-"""Схемы данных для генерации платёжного QR-кода."""
+"""Схемы данных для генерации платёжного QR-кода.
+
+Ограничения длин берутся из :mod:`nosbp.core.constants` — из того же
+места, что и колонки базы и описания HTTP-параметров.
+"""
 
 from pydantic import BaseModel, ConfigDict, Field
+
+from nosbp.core.constants import (
+    ACCOUNT_PATTERN,
+    BANK_NAME_MAX_LENGTH,
+    BIC_PATTERN,
+    INN_PATTERN,
+    KPP_PATTERN,
+    MAX_SUM_KOPECKS,
+    NAME_MAX_LENGTH,
+    PHONE_MAX_LENGTH,
+    PURPOSE_MAX_LENGTH,
+)
 
 
 class PayerInfo(BaseModel):
@@ -14,15 +30,10 @@ class PayerInfo(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    last_name: str | None = Field(default=None, max_length=160)
-    first_name: str | None = Field(default=None, max_length=160)
-    middle_name: str | None = Field(default=None, max_length=160)
-    phone: str | None = Field(default=None, max_length=25)
-
-    @property
-    def is_empty(self) -> bool:
-        """Плательщик не указан вовсе."""
-        return not any((self.last_name, self.first_name, self.middle_name, self.phone))
+    last_name: str | None = Field(default=None, max_length=NAME_MAX_LENGTH)
+    first_name: str | None = Field(default=None, max_length=NAME_MAX_LENGTH)
+    middle_name: str | None = Field(default=None, max_length=NAME_MAX_LENGTH)
+    phone: str | None = Field(default=None, max_length=PHONE_MAX_LENGTH)
 
 
 class PaymentRequest(BaseModel):
@@ -33,12 +44,12 @@ class PaymentRequest(BaseModel):
     sum_kopecks: int | None = Field(
         default=None,
         ge=1,
-        le=99_999_999_999,
+        le=MAX_SUM_KOPECKS,
         description="Сумма платежа в копейках, как того требует ГОСТ.",
     )
     purpose: str | None = Field(
         default=None,
-        max_length=210,
+        max_length=PURPOSE_MAX_LENGTH,
         description="Назначение платежа.",
     )
     payer: PayerInfo = Field(default_factory=PayerInfo)
@@ -47,17 +58,17 @@ class PaymentRequest(BaseModel):
 class PayeeRequisites(BaseModel):
     """Реквизиты получателя платежа.
 
-    Собирается из модели ``Organization``. Валидация форматов происходит
+    Собирается из модели ``Organization``. Контрольные разряды проверяются
     при сохранении организации, а не на каждом запросе — здесь схема нужна
-    как typed-контракт между слоем данных и генератором строки ГОСТ.
+    как типизированный контракт между слоем данных и генератором строки ГОСТ.
     """
 
     model_config = ConfigDict(frozen=True)
 
-    name: str = Field(min_length=1, max_length=160)
-    personal_acc: str = Field(pattern=r"^\d{20}$")
-    bank_name: str = Field(min_length=1, max_length=45)
-    bic: str = Field(pattern=r"^\d{9}$")
-    corresp_acc: str = Field(pattern=r"^\d{20}$")
-    payee_inn: str = Field(pattern=r"^\d{10}$|^\d{12}$")
-    kpp: str | None = Field(default=None, pattern=r"^\d{9}$")
+    name: str = Field(min_length=1, max_length=NAME_MAX_LENGTH)
+    personal_acc: str = Field(pattern=ACCOUNT_PATTERN)
+    bank_name: str = Field(min_length=1, max_length=BANK_NAME_MAX_LENGTH)
+    bic: str = Field(pattern=BIC_PATTERN)
+    corresp_acc: str = Field(pattern=ACCOUNT_PATTERN)
+    payee_inn: str = Field(pattern=INN_PATTERN)
+    kpp: str | None = Field(default=None, pattern=KPP_PATTERN)

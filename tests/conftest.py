@@ -37,9 +37,8 @@ from nosbp.db.session import (
     get_engine,
     get_session_factory,
 )
-from nosbp.main import create_app
+from nosbp.main import build_logo_cache, create_app
 from nosbp.payments.tokens import generate_token, hash_token, token_prefix
-from nosbp.storage.logo_cache import LogoCache
 from nosbp.storage.memory import MemoryStorage
 from tests.factories import ORG_DEFAULTS
 
@@ -106,7 +105,7 @@ async def client(storage: MemoryStorage) -> AsyncIterator[AsyncClient]:
     """
     app = create_app()
     app.state.storage = storage
-    app.state.logo_cache = LogoCache(storage)
+    app.state.logo_cache = build_logo_cache(app, get_settings())
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as http:

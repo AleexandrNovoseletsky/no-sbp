@@ -7,16 +7,14 @@ import pytest
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from nosbp.billing.service import (
-    BillingService,
-    OverdraftExtensionLimitError,
-    OverdraftNotActiveError,
-    calculate_balance_from_ledger,
-)
+from nosbp.billing.service import BillingService, calculate_balance_from_ledger
 from nosbp.core.config import Settings
 from nosbp.core.errors import (
+    AccountDisabledError,
     DailyLimitExceededError,
     InsufficientFundsError,
+    OverdraftExtensionLimitError,
+    OverdraftNotActiveError,
     ValidationError,
 )
 from nosbp.db.models import Account, LedgerEntry, LedgerEntryType
@@ -228,9 +226,14 @@ async def test_refund_is_a_separate_ledger_entry(session, settings, make_account
 
 
 async def test_disabled_account_cannot_spend(session, settings, make_account):
+    """Отключённый аккаунт — это не про деньги.
+
+    Ошибка должна отличаться от нехватки средств: пополнение баланса
+    ничего не изменит, и заказчику важно это понимать.
+    """
     account = await make_account(balance_rubles=100)
     account.is_active = False
-    with pytest.raises(InsufficientFundsError, match="отключён"):
+    with pytest.raises(AccountDisabledError, match="отключён"):
         await BillingService(session, settings).charge_for_invoice(
             account, invoice_id=None
         )

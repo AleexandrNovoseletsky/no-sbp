@@ -1,14 +1,25 @@
 """Настройки приложения.
 
-Все значения читаются из переменных окружения (или из файла .env рядом с
-проектом). Ни одна настройка не зашита в код — это позволяет держать один
-и тот же образ для локальной разработки и для продакшена.
+Значения читаются из переменных окружения или из файла ``.env`` рядом
+с проектом. Всё, что может отличаться между локальной машиной, стендом
+и продакшеном, живёт здесь — от адреса базы до стоимости счёта.
+
+Константы, которые задаются стандартом и меняться не могут, лежат
+в :mod:`nosbp.core.constants`.
 """
 
 from functools import lru_cache
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from nosbp.core.constants import (
+    DEFAULT_QR_BORDER,
+    DEFAULT_QR_SCALE,
+)
+
+LOCAL_ENVIRONMENT = "local"
+"""Значение ``ENVIRONMENT``, при котором логи выводятся для человека."""
 
 
 class Settings(BaseSettings):
@@ -22,10 +33,17 @@ class Settings(BaseSettings):
 
     # ---------------------------------------------------------------- общее
     environment: str = Field(
-        default="local",
+        default=LOCAL_ENVIRONMENT,
         description="local | staging | production. Влияет на формат логов.",
     )
     log_level: str = Field(default="INFO")
+    public_base_url: str = Field(
+        default="https://nosbp.ru",
+        description=(
+            "Адрес, по которому сервис доступен снаружи. Из него собираются "
+            "ссылки в документации и в подсказках консольной утилиты."
+        ),
+    )
 
     # ------------------------------------------------------------ база данных
     database_url: str = Field(
@@ -34,24 +52,34 @@ class Settings(BaseSettings):
     )
     db_echo: bool = Field(default=False, description="Печатать SQL в логи.")
 
-    # -------------------------------------------------------- объектное хранилище
-    # Здесь лежат логотипы организаций. Готовые QR-коды НЕ хранятся:
+    # --------------------------------------------------- объектное хранилище
+    # Здесь лежат логотипы организаций. Готовые QR-коды не хранятся:
     # повторный запрос содержит те же параметры, поэтому картинка просто
     # рисуется заново — это дешевле, чем хранить десятки тысяч файлов в сутки.
     s3_endpoint_url: str | None = Field(
         default=None,
-        description="Адрес S3-совместимого хранилища. None — настоящий AWS S3.",
+        description="Адрес S3-совместимого хранилища. Пусто — настоящий AWS S3.",
     )
     s3_region: str = Field(default="ru-central1")
     s3_bucket: str = Field(default="nosbp-logos")
     s3_access_key: str = Field(default="")
     s3_secret_key: str = Field(default="")
+    s3_connect_timeout_seconds: float = Field(
+        default=3.0,
+        gt=0,
+        description=(
+            "Таймаут подключения к хранилищу. Без него зависшее хранилище "
+            "заблокировало бы поток, обслуживающий запрос."
+        ),
+    )
+    s3_read_timeout_seconds: float = Field(default=5.0, gt=0)
+    s3_max_attempts: int = Field(default=3, ge=1)
 
     # ------------------------------------------------------------ тарификация
     invoice_price_kopecks: int = Field(
         default=100,
         ge=0,
-        description="Стоимость генерации одного счёта. По умолчанию 1 рубль.",
+        description="Стоимость генерации одного счёта, в копейках.",
     )
     invoice_free_period_days: int = Field(
         default=30,
@@ -69,7 +97,7 @@ class Settings(BaseSettings):
     overdraft_extension_days: int = Field(
         default=3,
         ge=0,
-        description="На сколько дней заказчик может продлить овердрафт из кабинета.",
+        description="На сколько дней заказчик может продлить овердрафт.",
     )
     overdraft_max_extensions: int = Field(
         default=1,
@@ -79,31 +107,64 @@ class Settings(BaseSettings):
     min_topup_kopecks: int = Field(
         default=100_000,
         ge=0,
-        description="Минимальная сумма пополнения баланса. По умолчанию 1000 рублей.",
+        description="Минимальная сумма пополнения баланса, в копейках.",
     )
     default_daily_charge_limit_kopecks: int | None = Field(
         default=50_000,
+        ge=0,
         description=(
-            "Потолок списаний за сутки для новых аккаунтов, защита от "
-            "выжигания баланса чужим ключом. None — без ограничения."
+            "Потолок списаний за сутки для новых аккаунтов — защита от "
+            "выжигания баланса чужим ключом. Пусто — без ограничения."
+        ),
+    )
+    billing_day_timezone: str = Field(
+        default="Europe/Moscow",
+        description=(
+            "Часовой пояс, по которому начинаются сутки для суточного лимита. "
+            "В UTC лимит сбрасывался бы среди рабочего дня заказчика."
+        ),
+    )
+
+    # --------------------------------------------------------------- ключи
+    token_last_used_throttle_seconds: int = Field(
+        default=300,
+        ge=0,
+        description=(
+            "Как часто обновлять отметку последнего использования ключа. "
+            "Без ограничения это лишняя запись в базу на каждом запросе, "
+            "а точность до секунды в кабинете никому не нужна."
         ),
     )
 
     # ------------------------------------------------------------- отрисовка
-    qr_scale: int = Field(default=10, ge=1, le=40)
-    qr_border: int = Field(default=4, ge=0, le=16)
+    qr_scale: int = Field(default=DEFAULT_QR_SCALE, ge=1, le=40)
+    qr_border: int = Field(default=DEFAULT_QR_BORDER, ge=0, le=16)
+
+    logo_cache_ttl_seconds: int = Field(
+        default=600,
+        ge=0,
+        description="Сколько держать логотип организации в памяти процесса.",
+    )
+    logo_cache_max_entries: int = Field(
+        default=512,
+        ge=1,
+        description=(
+            "Предел числа логотипов в кэше. Без него кэш растёт вместе "
+            "с числом организаций и однажды съест всю память."
+        ),
+    )
 
     @property
     def is_local(self) -> bool:
         """Локальная разработка — логи человекочитаемые, а не JSON."""
-        return self.environment == "local"
+        return self.environment == LOCAL_ENVIRONMENT
 
 
 @lru_cache
 def get_settings() -> Settings:
-    """Возвращает singleton настроек.
+    """Возвращает единственный экземпляр настроек.
 
-    Кэшируется, чтобы .env читался один раз за время жизни процесса.
+    Кэшируется, чтобы ``.env`` читался один раз за время жизни процесса.
     В тестах кэш сбрасывается через ``get_settings.cache_clear()``.
     """
     return Settings()
