@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block title %}Заказчики — NoSBP{% endblock %}
+{% block content %}
+<h1>Заказчики</h1>
+<p class="sub">Всего {{ rows | length }}. Экономия считается по ставке эквайринга,
+   заданной у каждой организации.</p>
+
+<div class="kpi">
+  <div><div class="n">{{ total_invoices }}</div><div class="l">уникальных операций</div></div>
+  <div><div class="n">{{ format_roubles(total_savings, fractional=False) }}</div><div class="l">сэкономлено заказчикам</div></div>
+</div>
+
+<div class="tabs">
+  <a href="{{ admin_prefix }}/?period=month{% if search %}&q={{ search }}{% endif %}"
+     class="{{ 'active' if period == 'month' else '' }}">За текущий месяц</a>
+  <a href="{{ admin_prefix }}/?period=all{% if search %}&q={{ search }}{% endif %}"
+     class="{{ 'active' if period != 'month' else '' }}">За всё время</a>
+</div>
+
+<form method="get" action="{{ admin_prefix }}/" class="actions" style="margin:0 0 16px">
+  <input type="hidden" name="period" value="{{ period }}">
+  <input type="text" name="q" value="{{ search }}" placeholder="Поиск по почте или названию"
+         style="max-width:320px">
+  <button type="submit" class="ghost">Найти</button>
+  <a class="btn" href="{{ admin_prefix }}/accounts/new">Добавить заказчика</a>
+</form>
+
+<div class="tablewrap">
+<table>
+  <thead>
+    <tr>
+      <th>Заказчик</th>
+      <th>Состояние</th>
+      <th class="num">Баланс</th>
+      <th class="num">Операций</th>
+      <th class="num">Оборот</th>
+      <th class="num">Сэкономлено</th>
+    </tr>
+  </thead>
+  <tbody>
+  {% for row in rows %}
+    <tr>
+      <td>
+        <a href="{{ admin_prefix }}/accounts/{{ row.account.id }}">{{ row.account.display_name }}</a>
+        <div class="muted mono">{{ row.account.email }}</div>
+      </td>
+      <td>
+        {% if row.account.is_active %}
+          <span class="pill on">работает</span>
+        {% else %}
+          <span class="pill off">отключён</span>
+        {% endif %}
+        {% if row.account.is_unlimited %}<span class="pill free">безлимит</span>{% endif %}
+      </td>
+      <td class="num">
+        {% if row.account.is_unlimited %}
+          <span class="muted">—</span>
+        {% else %}
+          {{ format_roubles(row.account.balance_kopecks) }}
+          {% if row.account.overdraft_until %}<div class="muted" style="font-size:11px">в долг</div>{% endif %}
+        {% endif %}
+      </td>
+      <td class="num">{{ row.invoice_count }}</td>
+      <td class="num">{{ format_roubles(row.turnover_kopecks, fractional=False) }}</td>
+      <td class="num">{{ format_roubles(row.savings_kopecks, fractional=False) }}</td>
+    </tr>
+  {% else %}
+    <tr><td colspan="6" class="muted">Заказчиков пока нет.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endblock %}

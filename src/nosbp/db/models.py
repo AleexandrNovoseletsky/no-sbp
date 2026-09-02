@@ -31,6 +31,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from nosbp.core.constants import (
     ACCOUNT_LENGTH,
+    ADMIN_SESSION_TOKEN_BYTES,
     ALIAS_MAX_LENGTH,
     BANK_NAME_MAX_LENGTH,
     BIC_LENGTH,
@@ -47,6 +48,7 @@ from nosbp.core.constants import (
     STORAGE_KEY_MAX_LENGTH,
     TOKEN_LABEL_MAX_LENGTH,
     TOKEN_PREFIX_LENGTH,
+    TOTP_SECRET_LENGTH,
 )
 from nosbp.db.base import Base, created_at_column, utcnow, uuid_pk
 
@@ -113,6 +115,14 @@ class Account(Base):
     )
     """Потолок списаний за календарные сутки. None — без ограничения."""
 
+    is_unlimited: Mapped[bool] = mapped_column(Boolean, default=False)
+    """Обслуживание без списаний.
+
+    Счета создаются как обычно и попадают в статистику, но денег с баланса
+    не берут и проверок хватает средств не проходят. Для своих и для
+    показательных внедрений.
+    """
+
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime.datetime] = created_at_column()
 
@@ -174,6 +184,21 @@ class Organization(Base):
 
     Фон всегда остаётся белым: прозрачный или светлый фон на тёмной подложке
     делает код нечитаемым для сканера.
+    """
+
+    # ---- Для подсчёта экономии -----------------------------------------
+    acquiring_fee_bps: Mapped[int] = mapped_column(Integer, default=70)
+    """Ставка эквайринга в базисных пунктах: 70 — это 0,7 %.
+
+    У каждой организации своя: тарифы банков различаются, а у одного
+    заказчика может быть и ООО с одной ставкой, и ИП с другой.
+    """
+
+    average_check_kopecks: Mapped[int | None] = mapped_column(BigInteger, default=None)
+    """Средний чек — на случай счетов без указанной суммы.
+
+    Если плательщик вводит сумму сам, посчитать оборот по счёту нельзя,
+    и в оценку экономии подставляется это значение.
     """
 
     is_default: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -352,3 +377,90 @@ class LedgerEntry(Base):
 
     def __repr__(self) -> str:
         return f"<LedgerEntry {self.entry_type} {self.amount_kopecks}>"
+
+
+class AdminUser(Base):
+    """Администратор сервиса.
+
+    Создаётся только консольной командой: регистрации через веб нет и
+    быть не должно — панель управляет чужими деньгами.
+    """
+
+    __tablename__ = "admin_users"
+
+    id: Mapped[uuid.UUID] = uuid_pk()
+    email: Mapped[str] = mapped_column(
+        String(EMAIL_MAX_LENGTH), unique=True, index=True
+    )
+    password_hash: Mapped[str] = mapped_column(String(PASSWORD_HASH_MAX_LENGTH))
+
+    totp_secret: Mapped[str | None] = mapped_column(
+        String(TOTP_SECRET_LENGTH), default=None
+    )
+    """Секрет для одноразовых кодов.
+
+    Лежит открыто: тот, у кого есть доступ к базе, всё равно уже внутри
+    периметра. Второй фактор защищает от увода пароля, а не от взлома
+    сервера.
+    """
+
+    failed_attempts: Mapped[int] = mapped_column(Integer, default=0)
+    locked_until: Mapped[datetime.datetime | None] = mapped_column(
+        DateTime(timezone=True), default=None
+    )
+    """До какого момента вход заблокирован после неудачных попыток."""
+
+    last_login_at: Mapped[datetime.datetime | None] = mapped_column(
+        DateTime(timezone=True), default=None
+    )
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime.datetime] = created_at_column()
+
+    sessions: Mapped[list["AdminSession"]] = relationship(
+        back_populates="admin", cascade="all, delete-orphan"
+    )
+
+    def __repr__(self) -> str:
+        return f"<AdminUser {self.email}>"
+
+
+class AdminSession(Base):
+    """Сессия администратора.
+
+    Хранится в базе, а не в подписанной куке: так сессию можно отозвать
+    мгновенно, и перезапуск сервиса не выкидывает всех наружу.
+    """
+
+    __tablename__ = "admin_sessions"
+
+    id: Mapped[uuid.UUID] = uuid_pk()
+    admin_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("admin_users.id", ondelete="CASCADE"), index=True
+    )
+
+    token_hash: Mapped[str] = mapped_column(
+        String(SHA256_HEX_LENGTH), unique=True, index=True
+    )
+    """В базе только хэш — из дампа рабочую сессию не достать."""
+
+    csrf_token: Mapped[str] = mapped_column(String(2 * ADMIN_SESSION_TOKEN_BYTES))
+    """Токен для форм: защищает от запросов, отправленных чужим сайтом."""
+
+    expires_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True))
+    last_seen_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow
+    )
+    revoked_at: Mapped[datetime.datetime | None] = mapped_column(
+        DateTime(timezone=True), default=None
+    )
+
+    ip_address: Mapped[str] = mapped_column(String(45), default="")
+    """IPv6 в текстовом виде занимает до 45 символов."""
+
+    user_agent: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime.datetime] = created_at_column()
+
+    admin: Mapped["AdminUser"] = relationship(back_populates="sessions")
+
+    def __repr__(self) -> str:
+        return f"<AdminSession admin={self.admin_id}>"

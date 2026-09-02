@@ -20,22 +20,17 @@ from typing import Final
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from nosbp.admin import crud
+from nosbp.admin.cli import register_admin_commands
+from nosbp.admin.stats import format_fee_percent, parse_fee_percent
 from nosbp.billing.service import BillingService, calculate_balance_from_ledger
 from nosbp.core.config import Settings, get_settings
 from nosbp.core.constants import DEFAULT_QR_COLOR
 from nosbp.core.errors import NosbpError
 from nosbp.core.money import format_roubles, to_kopecks
 from nosbp.db.base import utcnow
-from nosbp.db.models import Account, ApiToken, LedgerEntry, Organization
+from nosbp.db.models import Account, ApiToken, LedgerEntry
 from nosbp.db.session import dispose_engine, get_session_factory
-from nosbp.payments.qr import validate_qr_color
-from nosbp.payments.requisites import (
-    validate_account,
-    validate_bic,
-    validate_inn,
-    validate_kpp,
-)
-from nosbp.payments.tokens import generate_token, hash_token, token_prefix
 from nosbp.storage.s3 import S3Storage
 
 LOGO_CONTENT_TYPES: Final[Mapping[str, str]] = {
@@ -83,15 +78,19 @@ def _resolve_daily_limit(requested: int | None, settings: Settings) -> int | Non
 
 async def cmd_account_create(args: argparse.Namespace) -> None:
     """Создаёт учётную запись заказчика."""
-    limit = _resolve_daily_limit(args.daily_limit, get_settings())
+    settings = get_settings()
+    limit = _resolve_daily_limit(args.daily_limit, settings)
 
     async with get_session_factory()() as session:
-        account = Account(
+        account = await crud.create_account(
+            session,
+            settings,
             email=args.email,
             display_name=args.name,
-            daily_charge_limit_kopecks=limit,
+            daily_limit_kopecks=limit,
+            is_unlimited=args.unlimited,
+            use_default_limit=False,
         )
-        session.add(account)
         await session.commit()
 
     shown = (
@@ -100,68 +99,48 @@ async def cmd_account_create(args: argparse.Namespace) -> None:
     print(f"Аккаунт создан: {account.email}")
     print(f"  id:                {account.id}")
     print(f"  суточный лимит:    {shown}")
+    print(f"  безлимит:          {'да' if account.is_unlimited else 'нет'}")
 
 
 async def cmd_org_add(args: argparse.Namespace) -> None:
     """Добавляет организацию-получателя платежа с проверкой реквизитов."""
-    # Все проверки — до открытия сессии: незачем держать соединение,
-    # пока выясняется, что в счёте опечатка.
-    bic = validate_bic(args.bic)
-    personal_acc = validate_account(args.account, bic)
-    corresp_acc = validate_account(args.corr, bic)
-    inn = validate_inn(args.inn)
-    kpp = validate_kpp(args.kpp)
-    color = validate_qr_color(args.color)
+    settings = get_settings()
+    data = crud.RequisitesInput(
+        alias=args.alias,
+        name=args.name,
+        personal_acc=args.account,
+        bank_name=args.bank,
+        bic=args.bic,
+        corresp_acc=args.corr,
+        payee_inn=args.inn,
+        kpp=args.kpp,
+        qr_color=args.color,
+        acquiring_fee_bps=(
+            parse_fee_percent(args.fee)
+            if args.fee
+            else settings.default_acquiring_fee_bps
+        ),
+        average_check_kopecks=(
+            to_kopecks(args.average_check) if args.average_check else None
+        ),
+        is_default=args.default,
+    )
 
     async with get_session_factory()() as session:
         account = await _find_account(session, args.email)
+        organization = await crud.create_organization(session, account, data)
 
-        logo_key = (
-            await _upload_logo(Path(args.logo), account.id) if args.logo else None
-        )
+        if args.logo:
+            organization.logo_key = await _upload_logo(Path(args.logo), account.id)
+        logo_key = organization.logo_key
 
-        if args.default:
-            await _clear_default_organization(session, account.id)
-
-        organization = Organization(
-            account_id=account.id,
-            alias=args.alias,
-            name=args.name,
-            personal_acc=personal_acc,
-            bank_name=args.bank,
-            bic=bic,
-            corresp_acc=corresp_acc,
-            payee_inn=inn,
-            kpp=kpp,
-            qr_color=color,
-            logo_key=logo_key,
-            is_default=args.default,
-        )
-        session.add(organization)
         await session.commit()
 
     print(f"Организация добавлена: {organization.alias} — {organization.name}")
     print(f"  цвет QR:           {organization.qr_color}")
     print(f"  логотип:           {logo_key or 'нет'}")
+    print(f"  ставка эквайринга: {format_fee_percent(organization.acquiring_fee_bps)}")
     print(f"  по умолчанию:      {'да' if organization.is_default else 'нет'}")
-
-
-async def _clear_default_organization(
-    session: AsyncSession, account_id: uuid.UUID
-) -> None:
-    """Снимает признак «по умолчанию» с прежней организации.
-
-    Организация по умолчанию может быть только одна: иначе запрос без
-    параметра org выбирал бы её случайно.
-    """
-    result = await session.execute(
-        select(Organization).where(
-            Organization.account_id == account_id,
-            Organization.is_default.is_(True),
-        )
-    )
-    for organization in result.scalars():
-        organization.is_default = False
 
 
 async def _upload_logo(path: Path, account_id: uuid.UUID) -> str:
@@ -191,18 +170,9 @@ async def _upload_logo(path: Path, account_id: uuid.UUID) -> str:
 
 async def cmd_token_issue(args: argparse.Namespace) -> None:
     """Выпускает новый ключ API."""
-    token = generate_token()
-
     async with get_session_factory()() as session:
         account = await _find_account(session, args.email)
-        session.add(
-            ApiToken(
-                account_id=account.id,
-                token_hash=hash_token(token),
-                prefix=token_prefix(token),
-                label=args.label,
-            )
-        )
+        token = await crud.issue_token(session, account, label=args.label)
         await session.commit()
 
     base_url = get_settings().public_base_url.rstrip("/")
@@ -317,6 +287,11 @@ def build_parser() -> argparse.ArgumentParser:
             "Не указан — взять значение из настроек."
         ),
     )
+    create.add_argument(
+        "--unlimited",
+        action="store_true",
+        help="Безлимит: счета генерируются бесплатно.",
+    )
     create.set_defaults(func=cmd_account_create)
 
     org = sub.add_parser("org", help="Организации-получатели").add_subparsers(
@@ -334,6 +309,15 @@ def build_parser() -> argparse.ArgumentParser:
     add.add_argument("--kpp", default=None, help="КПП, 9 цифр (у ИП нет)")
     add.add_argument("--color", default=DEFAULT_QR_COLOR, help="Цвет QR, #RRGGBB")
     add.add_argument("--logo", default=None, help="Путь к PNG или JPEG логотипа")
+    add.add_argument(
+        "--fee", default=None, help="Ставка эквайринга в процентах, например 0,7"
+    )
+    add.add_argument(
+        "--average-check",
+        type=int,
+        default=None,
+        help="Средний чек в рублях — для счетов без указанной суммы",
+    )
     add.add_argument("--default", action="store_true", help="Сделать основной")
     add.set_defaults(func=cmd_org_add)
 
@@ -365,6 +349,8 @@ def build_parser() -> argparse.ArgumentParser:
     balance.add_argument("--email", required=True)
     balance.add_argument("--limit", type=int, default=DEFAULT_STATEMENT_LIMIT)
     balance.set_defaults(func=cmd_balance)
+
+    register_admin_commands(sub)
 
     return parser
 

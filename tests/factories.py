@@ -22,3 +22,6 @@ ORG_DEFAULTS = {
     "payee_inn": INN_COMPANY,
     "kpp": KPP,
 }
+
+ADMIN_PREFIX = "/admin"
+"""Адрес панели управления в тестах — совпадает со значением по умолчанию."""

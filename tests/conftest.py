@@ -28,10 +28,16 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from nosbp.admin.dependencies import build_templates as build_admin_templates
+from nosbp.admin.security import (
+    SESSION_COOKIE_NAME,
+    generate_totp_secret,
+    hash_password,
+)
 from nosbp.billing.service import BillingService
 from nosbp.core.config import Settings, get_settings
 from nosbp.db.base import Base
-from nosbp.db.models import Account, ApiToken, Organization
+from nosbp.db.models import Account, AdminUser, ApiToken, Organization
 from nosbp.db.session import (
     dispose_engine,
     get_engine,
@@ -40,9 +46,11 @@ from nosbp.db.session import (
 from nosbp.main import build_logo_cache, create_app
 from nosbp.payments.tokens import generate_token, hash_token, token_prefix
 from nosbp.storage.memory import MemoryStorage
-from tests.factories import ORG_DEFAULTS
+from tests.factories import ADMIN_PREFIX, ORG_DEFAULTS
 
 TABLES = (
+    "admin_sessions",
+    "admin_users",
     "ledger_entries",
     "invoices",
     "api_tokens",
@@ -196,3 +204,85 @@ async def merchant(make_account, make_organization, make_token):
     organization = await make_organization(account)
     token = await make_token(account)
     return account, organization, token
+
+
+# ---------------------------------------------------------------------------
+# Панель управления
+# ---------------------------------------------------------------------------
+
+ADMIN_PASSWORD = "administrator-42-secret"
+"""Пароль тестового администратора — проходит проверку на стойкость."""
+
+
+@pytest_asyncio.fixture
+async def make_admin(session: AsyncSession):
+    """Фабрика администраторов. Возвращает (администратор, пароль, секрет 2ФА)."""
+
+    async def _make(
+        *, email: str | None = None, is_active: bool = True
+    ) -> tuple[AdminUser, str, str]:
+        secret = generate_totp_secret()
+        admin = AdminUser(
+            email=email or f"admin-{uuid.uuid4().hex[:8]}@example.com",
+            password_hash=hash_password(ADMIN_PASSWORD),
+            totp_secret=secret,
+            is_active=is_active,
+        )
+        session.add(admin)
+        await session.commit()
+        return admin, ADMIN_PASSWORD, secret
+
+    return _make
+
+
+@pytest_asyncio.fixture
+async def panel(storage: MemoryStorage) -> AsyncIterator[AsyncClient]:
+    """Клиент панели управления.
+
+    Адрес https, а не http: сессионная кука помечена Secure, и по http
+    браузер (и httpx) её просто не сохранит — как и должно быть в проде.
+    """
+    app = create_app()
+    app.state.storage = storage
+    app.state.logo_cache = build_logo_cache(app, get_settings())
+    app.state.admin_templates = build_admin_templates(get_settings())
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(
+        transport=transport, base_url="https://panel.test", follow_redirects=False
+    ) as http:
+        yield http
+
+
+@pytest_asyncio.fixture
+async def logged_in(panel: AsyncClient, make_admin):
+    """Панель с открытой сессией администратора.
+
+    Возвращает (клиент, администратор, токен CSRF) — токен нужен каждой
+    форме, иначе запрос отклоняется.
+    """
+    import pyotp
+
+    admin, password, secret = await make_admin()
+    response = await panel.post(
+        f"{ADMIN_PREFIX}/login",
+        data={
+            "email": admin.email,
+            "password": password,
+            "totp_code": pyotp.TOTP(secret).now(),
+        },
+    )
+    assert response.status_code == 303, response.text
+    assert panel.cookies.get(SESSION_COOKIE_NAME)
+
+    csrf = await _read_csrf(panel)
+    return panel, admin, csrf
+
+
+async def _read_csrf(panel: AsyncClient) -> str:
+    """Вытаскивает токен CSRF из формы на странице списка заказчиков."""
+    page = await panel.get(f"{ADMIN_PREFIX}/accounts/new")
+    assert page.status_code == 200, page.text
+    marker = 'name="csrf_token" value="'
+    start = page.text.index(marker) + len(marker)
+    return page.text[start : page.text.index('"', start)]

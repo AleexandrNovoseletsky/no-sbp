@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}Новый заказчик — NoSBP{% endblock %}
+{% block content %}
+<h1>Новый заказчик</h1>
+<p class="sub">Почту потом не поменять: к ней привязаны ключи и переписка.</p>
+
+<div class="card" style="max-width:560px">
+<form method="post" action="{{ admin_prefix }}/accounts/new">
+  <input type="hidden" name="{{ csrf_field }}" value="{{ csrf }}">
+  <div class="grid two">
+    <div class="field">
+      <label for="email">Почта</label>
+      <input id="email" type="email" name="email" value="{{ email | default('') }}" required autofocus>
+    </div>
+    <div class="field">
+      <label for="display_name">Название компании</label>
+      <input id="display_name" type="text" name="display_name"
+             value="{{ display_name | default('') }}" required>
+    </div>
+  </div>
+  <div class="field" style="margin-top:14px; max-width:260px">
+    <label for="daily_limit">Суточный лимит списаний, ₽</label>
+    <input id="daily_limit" type="text" name="daily_limit" inputmode="decimal"
+           placeholder="из настроек сервиса">
+  </div>
+  <label class="check">
+    <input type="checkbox" name="is_unlimited" value="1">
+    Безлимит — счета генерируются бесплатно
+  </label>
+  <div class="actions">
+    <button type="submit">Создать</button>
+    <a class="btn ghost" href="{{ admin_prefix }}/">Отмена</a>
+  </div>
+</form>
+</div>
+{% endblock %}

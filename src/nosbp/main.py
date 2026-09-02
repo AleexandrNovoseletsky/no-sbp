@@ -4,13 +4,16 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from importlib.metadata import PackageNotFoundError, version
 from typing import Final
+from urllib.parse import urlencode
 
 import structlog
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 
+from nosbp.admin.dependencies import build_templates
+from nosbp.admin.routes import router as admin_router
 from nosbp.core.config import Settings, get_settings
-from nosbp.core.errors import NosbpError
+from nosbp.core.errors import AdminAuthError, NosbpError
 from nosbp.core.logging import configure_logging
 from nosbp.db.session import dispose_engine
 from nosbp.payments.routes import router as payments_router
@@ -21,6 +24,9 @@ log = structlog.get_logger()
 
 PACKAGE_NAME: Final[str] = "nosbp"
 FALLBACK_VERSION: Final[str] = "0.0.0"
+
+SEE_OTHER: Final = 303
+"""Код перенаправления после неудачной проверки сессии."""
 
 TITLE: Final[str] = "NoSBP"
 DESCRIPTION: Final[str] = (
@@ -66,6 +72,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """
     settings = get_settings()
     app.state.logo_cache = build_logo_cache(app, settings)
+    app.state.admin_templates = build_templates(settings)
 
     log.info("service_started", environment=settings.environment)
     yield
@@ -89,6 +96,19 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
+    @app.exception_handler(AdminAuthError)
+    async def handle_admin_auth(
+        request: Request, exc: AdminAuthError
+    ) -> RedirectResponse:
+        """Отправляет на страницу входа вместо голого кода 401.
+
+        Панель — это обычные страницы в браузере: администратор должен
+        увидеть форму входа, а не JSON с ошибкой.
+        """
+        prefix = settings.admin_path_prefix.rstrip("/")
+        query = urlencode({"err": exc.message})
+        return RedirectResponse(f"{prefix}/login?{query}", status_code=SEE_OTHER)
+
     @app.exception_handler(NosbpError)
     async def handle_domain_error(request: Request, exc: NosbpError) -> JSONResponse:
         """Превращает доменную ошибку в аккуратный JSON.
@@ -107,6 +127,7 @@ def create_app() -> FastAPI:
         return {"status": "ok"}
 
     app.include_router(payments_router)
+    app.include_router(admin_router, prefix=settings.admin_path_prefix.rstrip("/"))
     return app
 
 

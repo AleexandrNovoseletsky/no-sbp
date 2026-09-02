@@ -16,6 +16,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from nosbp.core.constants import (
     DEFAULT_QR_BORDER,
     DEFAULT_QR_SCALE,
+    MAX_ACQUIRING_FEE_BPS,
 )
 
 LOCAL_ENVIRONMENT = "local"
@@ -122,6 +123,58 @@ class Settings(BaseSettings):
         description=(
             "Часовой пояс, по которому начинаются сутки для суточного лимита. "
             "В UTC лимит сбрасывался бы среди рабочего дня заказчика."
+        ),
+    )
+
+    # ------------------------------------------------------ комиссия эквайринга
+    default_acquiring_fee_bps: int = Field(
+        default=70,
+        ge=0,
+        le=MAX_ACQUIRING_FEE_BPS,
+        description=(
+            "Ставка эквайринга по умолчанию в базисных пунктах: 70 — это "
+            "0,7 %. От неё считается, сколько заказчик сэкономил. У каждой "
+            "организации ставку можно переопределить."
+        ),
+    )
+
+    # --------------------------------------------------------------- админка
+    admin_path_prefix: str = Field(
+        default="/admin",
+        description="По какому адресу отвечает панель управления.",
+    )
+    admin_session_ttl_hours: int = Field(
+        default=12,
+        ge=1,
+        description="Сколько живёт сессия администратора без повторного входа.",
+    )
+    admin_session_idle_minutes: int = Field(
+        default=60,
+        ge=1,
+        description="Через сколько минут без действий сессия закрывается.",
+    )
+    admin_max_login_attempts: int = Field(
+        default=5,
+        ge=1,
+        description="Сколько неудачных попыток входа до временной блокировки.",
+    )
+    admin_lockout_minutes: int = Field(
+        default=15,
+        ge=1,
+        description="На сколько минут блокируется вход после исчерпания попыток.",
+    )
+    admin_require_totp: bool = Field(
+        default=True,
+        description=(
+            "Требовать одноразовый код из приложения-аутентификатора. "
+            "Выключать стоит только на локальной машине."
+        ),
+    )
+    admin_cookie_secure: bool = Field(
+        default=True,
+        description=(
+            "Отдавать сессионную куку только по HTTPS. На локальной машине "
+            "без сертификата придётся выключить, в проде — никогда."
         ),
     )
 

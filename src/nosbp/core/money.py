@@ -9,7 +9,7 @@
 рассыпан по коду.
 """
 
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 
 KOPECKS_PER_ROUBLE = 100
 """Копеек в рубле. Вынесено в константу, чтобы не искать «100» по коду."""
@@ -34,3 +34,25 @@ def format_roubles(kopecks: int, *, fractional: bool = True) -> str:
     """
     roubles = to_roubles(kopecks)
     return f"{roubles:.2f} ₽" if fractional else f"{roubles:.0f} ₽"
+
+
+def parse_roubles(text: str) -> int:
+    """Разбирает введённую человеком сумму в рублях и переводит в копейки.
+
+    Принимает и точку, и запятую: в русской раскладке на цифровом блоке
+    запятая, и требовать точку — значит собирать жалобы на ровном месте.
+
+    :raises ValueError: если строка не похожа на сумму.
+    """
+    cleaned = text.strip().replace(" ", "").replace("\u00a0", "").replace(",", ".")
+    if not cleaned:
+        raise ValueError("Сумма не указана.")
+    try:
+        roubles = Decimal(cleaned)
+    except InvalidOperation as exc:
+        raise ValueError(f"«{text}» не похоже на сумму.") from exc
+
+    kopecks = roubles * KOPECKS_PER_ROUBLE
+    if kopecks != kopecks.to_integral_value():
+        raise ValueError("Сумма указывается с точностью до копейки.")
+    return int(kopecks)

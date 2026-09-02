@@ -75,6 +75,24 @@ class OverdraftExtensionLimitError(NosbpError):
     code = "overdraft_extension_limit"
 
 
+class AdminAuthError(NosbpError):
+    """Неверная пара «почта — пароль» или неверный одноразовый код.
+
+    Текст намеренно один на все случаи: по разным сообщениям можно было бы
+    выяснить, какие адреса заведены в системе.
+    """
+
+    status_code = HTTPStatus.UNAUTHORIZED
+    code = "admin_auth_failed"
+
+
+class AdminLockedError(NosbpError):
+    """Вход временно заблокирован после неудачных попыток."""
+
+    status_code = HTTPStatus.TOO_MANY_REQUESTS
+    code = "admin_locked"
+
+
 class ValidationError(NosbpError):
     """Параметры запроса или сохраняемые данные не проходят проверку."""
 

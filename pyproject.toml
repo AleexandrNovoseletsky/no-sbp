@@ -20,6 +20,10 @@ dependencies = [
     "boto3 (>=1.36.0,<2.0.0)",
     "structlog (>=26.1.0,<27.0.0)",
     "greenlet (>=3.5.5,<4.0.0)",
+    "argon2-cffi (>=23.1)",
+    "pyotp (>=2.9)",
+    "jinja2 (>=3.1)",
+    "python-multipart (>=0.0.20)",
 ]
 
 [project.optional-dependencies]
@@ -63,6 +67,9 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 # В тестах допустимы длинные говорящие имена и магические числа.
 "tests/*" = ["E501"]
+# Миграции генерирует Alembic: длинные строки в них — не наш стиль,
+# а вывод генератора, и подгонять его вручную бессмысленно.
+"alembic/versions/*" = ["E501"]
 
 [tool.ruff.format]
 quote-style = "double"

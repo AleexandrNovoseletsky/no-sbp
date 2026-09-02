@@ -1,0 +1,105 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Организация' if organization else 'Новая организация' }} — NoSBP{% endblock %}
+{% block content %}
+
+{% set action = admin_prefix ~ '/organizations/' ~ organization.id ~ '/edit'
+   if organization else admin_prefix ~ '/accounts/' ~ account.id ~ '/organizations/new' %}
+
+<h1>{{ organization.name if organization else 'Новая организация' }}</h1>
+<p class="sub">Заказчик: <a href="{{ admin_prefix }}/accounts/{{ account.id }}">{{ account.display_name }}</a></p>
+
+<div class="card" style="max-width:820px">
+<form method="post" action="{{ action }}">
+  <input type="hidden" name="{{ csrf_field }}" value="{{ csrf }}">
+
+  <div class="grid two">
+    <div class="field">
+      <label for="alias">Короткое имя для параметра org</label>
+      <input id="alias" type="text" name="alias" required
+             value="{{ organization.alias if organization else '' }}" placeholder="main">
+    </div>
+    <div class="field">
+      <label for="name">Наименование получателя платежа</label>
+      <input id="name" type="text" name="name" required
+             value="{{ organization.name if organization else '' }}" placeholder="ООО Ромашка">
+    </div>
+  </div>
+
+  <h2 style="margin:24px 0 12px">Реквизиты</h2>
+  <p class="sub" style="margin-bottom:14px">Счёт и корр. счёт проверяются
+     по контрольному разряду для указанного БИК — опечатка не пройдёт.</p>
+
+  <div class="grid two">
+    <div class="field">
+      <label for="personal_acc">Расчётный счёт, 20 цифр</label>
+      <input id="personal_acc" type="text" name="personal_acc" required inputmode="numeric"
+             value="{{ organization.personal_acc if organization else '' }}">
+    </div>
+    <div class="field">
+      <label for="corresp_acc">Корр. счёт, 20 цифр</label>
+      <input id="corresp_acc" type="text" name="corresp_acc" required inputmode="numeric"
+             value="{{ organization.corresp_acc if organization else '' }}">
+    </div>
+    <div class="field">
+      <label for="bank_name">Банк</label>
+      <input id="bank_name" type="text" name="bank_name" required
+             value="{{ organization.bank_name if organization else '' }}">
+    </div>
+    <div class="field">
+      <label for="bic">БИК, 9 цифр</label>
+      <input id="bic" type="text" name="bic" required inputmode="numeric"
+             value="{{ organization.bic if organization else '' }}">
+    </div>
+    <div class="field">
+      <label for="payee_inn">ИНН, 10 или 12 цифр</label>
+      <input id="payee_inn" type="text" name="payee_inn" required inputmode="numeric"
+             value="{{ organization.payee_inn if organization else '' }}">
+    </div>
+    <div class="field">
+      <label for="kpp">КПП, 9 цифр (у ИП нет)</label>
+      <input id="kpp" type="text" name="kpp" inputmode="numeric"
+             value="{{ organization.kpp or '' if organization else '' }}">
+    </div>
+  </div>
+
+  <h2 style="margin:24px 0 12px">Подсчёт экономии</h2>
+  <div class="grid two">
+    <div class="field">
+      <label for="fee_percent">Ставка эквайринга, %</label>
+      <input id="fee_percent" type="text" name="fee_percent" inputmode="decimal"
+             placeholder="по умолчанию {{ default_fee_percent }}"
+             value="{{ format_fee_percent(organization.acquiring_fee_bps).replace(' %','') if organization else '' }}">
+    </div>
+    <div class="field">
+      <label for="average_check">Средний чек, ₽ — для счетов без суммы</label>
+      <input id="average_check" type="text" name="average_check" inputmode="decimal"
+             placeholder="не учитывать"
+             value="{{ '%.2f'|format(organization.average_check_kopecks / 100) if organization and organization.average_check_kopecks else '' }}">
+    </div>
+  </div>
+
+  <h2 style="margin:24px 0 12px">Оформление</h2>
+  <div class="grid two">
+    <div class="field">
+      <label for="qr_color">Цвет модулей QR</label>
+      <input id="qr_color" type="color" name="qr_color"
+             value="{{ organization.qr_color if organization else '#000000' }}">
+      <div class="muted" style="font-size:12px; margin-top:4px">
+        Слишком светлый цвет будет отклонён: такой код не сканируется.
+      </div>
+    </div>
+  </div>
+
+  <label class="check">
+    <input type="checkbox" name="is_default" value="1"
+           {{ 'checked' if organization and organization.is_default }}>
+    Организация по умолчанию — используется, когда в запросе нет параметра org
+  </label>
+
+  <div class="actions">
+    <button type="submit">{{ 'Сохранить' if organization else 'Добавить' }}</button>
+    <a class="btn ghost" href="{{ admin_prefix }}/accounts/{{ account.id }}">Отмена</a>
+  </div>
+</form>
+</div>
+{% endblock %}

@@ -102,7 +102,7 @@ class BillingService:
         invoice_id: uuid.UUID | None,
         amount_kopecks: int | None = None,
         comment: str = "",
-    ) -> LedgerEntry:
+    ) -> LedgerEntry | None:
         """Списывает стоимость одного счёта.
 
         Вызывается только когда аккаунт уже заблокирован через
@@ -112,10 +112,23 @@ class BillingService:
             в тестах и при служебных списаниях без привязки к счёту.
         :param amount_kopecks: сумма списания. По умолчанию берётся
             из настроек.
+        :return: запись журнала или None, если аккаунт обслуживается
+            без списаний.
         :raises AccountDisabledError: аккаунт отключён оператором.
         :raises InsufficientFundsError: баланс исчерпан и овердрафт закончился.
         :raises DailyLimitExceededError: превышен суточный потолок списаний.
         """
+        if not account.is_active:
+            raise AccountDisabledError(
+                "Аккаунт отключён. Напишите в поддержку, чтобы разобраться."
+            )
+
+        # Безлимит: счёт создаётся и попадает в статистику, но денег
+        # не стоит. Ни баланс, ни лимиты при этом не проверяются —
+        # иначе нулевой баланс друга заблокировал бы генерацию.
+        if account.is_unlimited:
+            return None
+
         amount = (
             self._settings.invoice_price_kopecks
             if amount_kopecks is None

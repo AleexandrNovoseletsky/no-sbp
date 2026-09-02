@@ -36,6 +36,10 @@ services:
       ENVIRONMENT: production
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       DATABASE_URL: ${DATABASE_URL}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-https://nosbp.ru}
+      ADMIN_PATH_PREFIX: ${ADMIN_PATH_PREFIX:-/admin}
+      ADMIN_REQUIRE_TOTP: ${ADMIN_REQUIRE_TOTP:-true}
+      ADMIN_COOKIE_SECURE: ${ADMIN_COOKIE_SECURE:-true}
       S3_ENDPOINT_URL: ${S3_ENDPOINT_URL}
       S3_REGION: ${S3_REGION}
       S3_BUCKET: ${S3_BUCKET}
@@ -51,4 +55,8 @@ services:
           memory: 512m
 
 volumes:
+  # Именованный том: данные живут отдельно от контейнера и переживают
+  # его пересоздание. При переносе на другой сервер том не копируется —
+  # переносится дамп, см. docker/backup.sh и раздел README о переезде.
   postgres-data:
+    name: nosbp-postgres-data

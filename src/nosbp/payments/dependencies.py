@@ -4,7 +4,7 @@ import datetime
 from typing import Annotated
 
 from fastapi import Depends, Request
-from sqlalchemy import select
+from sqlalchemy import or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from nosbp.core.config import Settings, get_settings
@@ -32,19 +32,41 @@ def get_logo_cache(request: Request) -> LogoCache:
 LogoCacheDep = Annotated[LogoCache, Depends(get_logo_cache)]
 
 
-def _should_refresh_last_used(
-    api_token: ApiToken, now: datetime.datetime, throttle_seconds: int
-) -> bool:
-    """Пора ли обновлять отметку последнего использования ключа.
+async def _mark_token_used(
+    session: AsyncSession,
+    api_token: ApiToken,
+    now: datetime.datetime,
+    throttle_seconds: int,
+) -> None:
+    """Отмечает использование ключа отдельным запросом к базе.
 
-    Обновлять её на каждом запросе — значит писать в базу даже там, где
-    деньги не двигаются и записи быть не должно. Точность до секунды
-    в кабинете никому не нужна, поэтому запись прореживается.
+    Два соображения, из-за которых это не простое присваивание атрибута.
+
+    Первое: отметка обновляется не чаще, чем раз в ``throttle_seconds``.
+    Условие стоит прямо в WHERE, поэтому при частых запросах строка
+    вообще не изменяется — и блокировка на неё не берётся.
+
+    Второе, важнее: запрос выполняется здесь и сейчас, до всех остальных
+    операций. Если бы отметка ставилась присваиванием, SQLAlchemy отправил
+    бы её в базу при коммите, в порядке, который зависит от того, какие
+    ещё объекты оказались в сессии. Один ключ общий для всех запросов
+    заказчика, и разный порядок захвата строк «ключ» и «аккаунт» в разных
+    транзакциях приводил к взаимной блокировке при одновременных запросах.
+    Единый порядок — ключ, потом аккаунт, потом счёт — эту возможность
+    убирает.
     """
-    if api_token.last_used_at is None:
-        return True
-    elapsed = now - api_token.last_used_at
-    return elapsed >= datetime.timedelta(seconds=throttle_seconds)
+    threshold = now - datetime.timedelta(seconds=throttle_seconds)
+    await session.execute(
+        update(ApiToken)
+        .where(
+            ApiToken.id == api_token.id,
+            or_(
+                ApiToken.last_used_at.is_(None),
+                ApiToken.last_used_at < threshold,
+            ),
+        )
+        .values(last_used_at=now)
+    )
 
 
 async def authenticate(
@@ -75,12 +97,9 @@ async def authenticate(
 
     # Отметка последнего использования нужна заказчику в кабинете:
     # по ней видно, какой из ключей ещё работает, а какой можно отозвать.
-    now = utcnow()
-    if _should_refresh_last_used(
-        api_token, now, settings.token_last_used_throttle_seconds
-    ):
-        api_token.last_used_at = now
-
+    await _mark_token_used(
+        session, api_token, utcnow(), settings.token_last_used_throttle_seconds
+    )
     return account
 
 

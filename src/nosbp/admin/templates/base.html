@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>{% block title %}Панель NoSBP{% endblock %}</title>
+<style>
+:root{
+  --paper:#f4f6f4; --surface:#fff; --surface-2:#eef2f0;
+  --ink:#14201e; --ink-soft:#5a6a66; --ink-faint:#8a9a95;
+  --line:#d6dfdb; --accent:#0e6b62; --accent-soft:#e0edea;
+  --warn:#a8442c; --warn-soft:#f6e8e3;
+  --ok:#2f6b3a; --ok-soft:#e3efe5;
+}
+@media (prefers-color-scheme:dark){
+  :root{
+    --paper:#0e1513; --surface:#16201e; --surface-2:#1c2725;
+    --ink:#e8efec; --ink-soft:#9aaca7; --ink-faint:#6e807b;
+    --line:#26332f; --accent:#54c2b1; --accent-soft:#16302c;
+    --warn:#e08d74; --warn-soft:#2e1e19;
+    --ok:#8fbe79; --ok-soft:#1b2618;
+  }
+}
+*{box-sizing:border-box}
+body{
+  margin:0; background:var(--paper); color:var(--ink);
+  font:15px/1.55 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+}
+a{color:var(--accent)}
+header{
+  background:var(--surface); border-bottom:1px solid var(--line);
+  padding:12px 20px; display:flex; align-items:center; gap:20px; flex-wrap:wrap;
+}
+header .brand{font-weight:700; letter-spacing:-.02em; font-size:17px; text-decoration:none; color:var(--ink)}
+header .spacer{flex:1}
+header .who{color:var(--ink-soft); font-size:13px}
+main{max-width:1180px; margin:0 auto; padding:24px 20px 80px}
+h1{font-size:24px; letter-spacing:-.02em; margin:0 0 4px}
+h2{font-size:17px; letter-spacing:-.01em; margin:32px 0 12px}
+.sub{color:var(--ink-soft); font-size:13.5px; margin:0 0 20px}
+.card{background:var(--surface); border:1px solid var(--line); border-radius:6px; padding:18px 20px; margin-bottom:16px}
+.flash{padding:11px 16px; border-radius:5px; margin-bottom:16px; font-size:14px}
+.flash.ok{background:var(--ok-soft); color:var(--ok); border:1px solid var(--ok)}
+.flash.err{background:var(--warn-soft); color:var(--warn); border:1px solid var(--warn)}
+.tablewrap{overflow-x:auto; border:1px solid var(--line); border-radius:6px; background:var(--surface)}
+table{border-collapse:collapse; width:100%; min-width:640px; font-size:14px}
+th{text-align:left; font-size:10.5px; letter-spacing:.1em; text-transform:uppercase;
+   color:var(--ink-faint); padding:10px 14px; border-bottom:1px solid var(--line); white-space:nowrap}
+td{padding:11px 14px; border-bottom:1px solid var(--line); vertical-align:top}
+tr:last-child td{border-bottom:none}
+td.num,th.num{text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap}
+.muted{color:var(--ink-faint)}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:12.5px}
+label{display:block; font-size:12.5px; color:var(--ink-soft); margin:0 0 4px}
+input[type=text],input[type=email],input[type=password],input[type=color],select{
+  width:100%; padding:8px 10px; font:inherit; color:var(--ink);
+  background:var(--surface-2); border:1px solid var(--line); border-radius:4px;
+}
+input[type=color]{padding:2px; height:36px}
+input:focus,select:focus{outline:2px solid var(--accent); outline-offset:1px}
+.grid{display:grid; gap:14px; grid-template-columns:1fr}
+@media(min-width:640px){.grid.two{grid-template-columns:1fr 1fr} .grid.three{grid-template-columns:1fr 1fr 1fr}}
+.field{margin-bottom:0}
+.check{display:flex; align-items:center; gap:8px; font-size:14px; color:var(--ink); margin:6px 0}
+.check input{width:auto}
+button,.btn{
+  font:inherit; padding:8px 15px; border-radius:4px; cursor:pointer;
+  border:1px solid var(--accent); background:var(--accent); color:var(--paper);
+  text-decoration:none; display:inline-block;
+}
+button.ghost,.btn.ghost{background:transparent; color:var(--accent)}
+button.danger{background:var(--warn); border-color:var(--warn); color:#fff}
+.actions{display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-top:16px}
+.pill{display:inline-block; font-size:11px; padding:2px 8px; border-radius:20px; white-space:nowrap}
+.pill.on{background:var(--ok-soft); color:var(--ok); border:1px solid var(--ok)}
+.pill.off{background:var(--warn-soft); color:var(--warn); border:1px solid var(--warn)}
+.pill.free{background:var(--accent-soft); color:var(--accent); border:1px solid var(--accent)}
+.kpi{display:flex; gap:28px; flex-wrap:wrap; margin:0 0 20px}
+.kpi div{min-width:120px}
+.kpi .n{font-size:24px; font-weight:700; letter-spacing:-.02em; font-variant-numeric:tabular-nums}
+.kpi .l{font-size:11px; letter-spacing:.08em; text-transform:uppercase; color:var(--ink-faint); margin-top:3px}
+.tabs{display:flex; gap:6px; margin-bottom:16px}
+.tabs a{font-size:13px; padding:5px 12px; border:1px solid var(--line); border-radius:20px; text-decoration:none; color:var(--ink-soft)}
+.tabs a.active{background:var(--accent-soft); border-color:var(--accent); color:var(--accent)}
+.token-box{background:var(--accent-soft); border:1px solid var(--accent); border-radius:5px; padding:14px 16px; margin-bottom:16px}
+.token-box .mono{display:block; margin-top:8px; word-break:break-all; font-size:14px; color:var(--ink)}
+form.inline{display:inline}
+</style>
+</head>
+<body>
+{% if admin is defined and admin %}
+<header>
+  <a class="brand" href="{{ admin_prefix }}/">NoSBP</a>
+  <a href="{{ admin_prefix }}/">Заказчики</a>
+  <span class="spacer"></span>
+  <span class="who">{{ admin.email }}</span>
+  <form method="post" action="{{ admin_prefix }}/logout" class="inline">
+    <input type="hidden" name="{{ csrf_field }}" value="{{ csrf | default('') }}">
+    <button class="ghost" type="submit">Выйти</button>
+  </form>
+</header>
+{% endif %}
+<main>
+  {% if ok %}<div class="flash ok">{{ ok }}</div>{% endif %}
+  {% if err %}<div class="flash err">{{ err }}</div>{% endif %}
+  {% block content %}{% endblock %}
+</main>
+</body>
+</html>
