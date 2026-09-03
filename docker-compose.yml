@@ -60,9 +60,10 @@ services:
       S3_BUCKET: nosbp-logos
       S3_ACCESS_KEY: nosbp
       S3_SECRET_KEY: nosbp-secret
-      # Локально сервис работает по http, а кука сессии помечена Secure —
-      # браузер её просто не сохранит. В продакшене всегда true.
+      # Локально сервис работает по http, а сессионная кука помечена
+      # Secure — браузер её не сохранит. В рабочем окружении всегда true.
       ADMIN_COOKIE_SECURE: "false"
+      PUBLIC_BASE_URL: http://127.0.0.1:8080
     ports:
       - "127.0.0.1:8080:8000"
 

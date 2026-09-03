@@ -79,21 +79,21 @@
         {{ org.personal_acc }}<br>{{ org.bank_name }} · БИК {{ org.bic }}
       </td>
       <td>
-        <span class="swatch" style="background:{{ org.qr_color }}"
+        <span class="swatch" data-color="{{ org.qr_color }}"
               title="{{ org.qr_color }}"></span>
         {% if org.logo_key %}<span class="pill free">логотип</span>{% endif %}
       </td>
       <td class="num">
         {{ format_fee_percent(org.acquiring_fee_bps) }}
         {% if item.turnover_is_estimated %}
-          <div class="muted" style="font-size:11px">по среднему чеку</div>
+          <div class="muted hint-small">по среднему чеку</div>
         {% endif %}
       </td>
       <td class="num">{{ item.invoice_count }}</td>
       <td class="num">{{ format_roubles(item.savings_kopecks, fractional=False) }}</td>
       <td class="num">
         <form method="post" action="{{ admin_prefix }}/organizations/{{ org.id }}/delete"
-              onsubmit="return confirm('Удалить организацию «{{ org.alias }}» вместе с её счетами?')">
+              data-confirm="Удалить организацию «{{ org.alias }}» вместе с её счетами?">
           <input type="hidden" name="{{ csrf_field }}" value="{{ csrf }}">
           <button class="ghost" type="submit">Удалить</button>
         </form>
@@ -119,7 +119,7 @@
     </div>
     {% if ledger_balance != account.balance_kopecks %}
     <div>
-      <div class="n" style="color:var(--warn)">{{ format_roubles(ledger_balance) }}</div>
+      <div class="n alarm">{{ format_roubles(ledger_balance) }}</div>
       <div class="l">по журналу — расхождение!</div>
     </div>
     {% endif %}
@@ -181,7 +181,7 @@
         {% if not token.revoked_at %}
         <form method="post"
               action="{{ admin_prefix }}/accounts/{{ account.id }}/tokens/{{ token.id }}/revoke"
-              onsubmit="return confirm('Отозвать ключ {{ token.prefix }}…? Интеграция перестанет работать сразу.')">
+              data-confirm="Отозвать ключ {{ token.prefix }}…? Интеграция перестанет работать сразу.">
           <input type="hidden" name="{{ csrf_field }}" value="{{ csrf }}">
           <button class="ghost" type="submit">Отозвать</button>
         </form>
@@ -196,7 +196,7 @@
 </div>
 <form method="post" action="{{ admin_prefix }}/accounts/{{ account.id }}/tokens" class="actions">
   <input type="hidden" name="{{ csrf_field }}" value="{{ csrf }}">
-  <input type="text" name="label" placeholder="Название: RetailCRM, Сайт…" style="max-width:280px">
+  <input type="text" name="label" placeholder="Название: RetailCRM, Сайт…" class="field-label">
   <button type="submit">Выпустить ключ</button>
 </form>
 
@@ -224,10 +224,10 @@
 <!-- ---------------- Удаление ---------------- -->
 <h2>Удаление</h2>
 <div class="card">
-  <p class="muted" style="margin-top:0">Удаляются организации, ключи, счета и вся
+  <p class="muted tight">Удаляются организации, ключи, счета и вся
      выписка. Восстановить можно только из резервной копии.</p>
   <form method="post" action="{{ admin_prefix }}/accounts/{{ account.id }}/delete"
-        onsubmit="return confirm('Удалить заказчика {{ account.email }} со всеми данными? Это необратимо.')">
+        data-confirm="Удалить заказчика {{ account.email }} со всеми данными? Это необратимо.">
     <input type="hidden" name="{{ csrf_field }}" value="{{ csrf }}">
     <button class="danger" type="submit">Удалить заказчика</button>
   </form>

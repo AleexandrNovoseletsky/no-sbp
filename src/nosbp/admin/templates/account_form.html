@@ -4,7 +4,7 @@
 <h1>Новый заказчик</h1>
 <p class="sub">Почту потом не поменять: к ней привязаны ключи и переписка.</p>
 
-<div class="card" style="max-width:560px">
+<div class="card card-medium">
 <form method="post" action="{{ admin_prefix }}/accounts/new">
   <input type="hidden" name="{{ csrf_field }}" value="{{ csrf }}">
   <div class="grid two">
@@ -18,7 +18,7 @@
              value="{{ form.display_name }}" required>
     </div>
   </div>
-  <div class="field" style="margin-top:14px; max-width:260px">
+  <div class="field spaced field-narrow">
     <label for="daily_limit">Суточный лимит списаний, ₽</label>
     <input id="daily_limit" type="text" name="daily_limit" inputmode="decimal"
            placeholder="из настроек сервиса" value="{{ form.daily_limit }}">

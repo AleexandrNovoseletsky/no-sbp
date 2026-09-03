@@ -9,6 +9,7 @@
 """
 
 from functools import lru_cache
+from ipaddress import IPv4Network, IPv6Network, ip_network
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -21,7 +22,7 @@ from nosbp.core.constants import (
 )
 
 LOCAL_ENVIRONMENT = "local"
-"""Значение ``ENVIRONMENT``, при котором логи выводятся для человека."""
+PRODUCTION_ENVIRONMENT = "production"
 
 
 class Settings(BaseSettings):
@@ -40,10 +41,18 @@ class Settings(BaseSettings):
     )
     log_level: str = Field(default="INFO")
     public_base_url: str = Field(
-        default="https://nosbp.ru",
+        default="http://127.0.0.1:8080",
         description=(
-            "Адрес, по которому сервис доступен снаружи. Из него собираются "
-            "ссылки в документации и в подсказках консольной утилиты."
+            "Внешний адрес сервиса вместе со схемой и портом. Используется "
+            "для сборки ссылок в выводе консольных команд и в документации. "
+            "В рабочем окружении задаётся обязательно."
+        ),
+    )
+    enable_api_docs: bool | None = Field(
+        default=None,
+        description=(
+            "Отдавать ли /docs, /redoc и /openapi.json. По умолчанию "
+            "включено везде, кроме production."
         ),
     )
 
@@ -141,8 +150,22 @@ class Settings(BaseSettings):
 
     # --------------------------------------------------------------- админка
     admin_path_prefix: str = Field(
-        default="/admin",
-        description="По какому адресу отвечает панель управления.",
+        default="/console",
+        min_length=2,
+        pattern=r"^/[A-Za-z0-9_\-/]*[A-Za-z0-9_\-]$",
+        description=(
+            "Путь, по которому отвечает панель управления. В рабочем "
+            "окружении задаётся собственным непубличным значением: это не "
+            "средство защиты, но отсекает сканеры и шум в логах."
+        ),
+    )
+    admin_allowed_networks: str = Field(
+        default="",
+        description=(
+            "Список сетей в формате CIDR через запятую, которым разрешён "
+            "доступ к панели. Пустое значение — проверка не выполняется "
+            "(ограничение задаётся на уровне обратного прокси)."
+        ),
     )
     admin_session_ttl_hours: int = Field(
         default=12,
@@ -218,8 +241,37 @@ class Settings(BaseSettings):
 
     @property
     def is_local(self) -> bool:
-        """Локальная разработка — логи человекочитаемые, а не JSON."""
+        """Признак локальной разработки: влияет на формат логов."""
         return self.environment == LOCAL_ENVIRONMENT
+
+    @property
+    def is_production(self) -> bool:
+        """Признак рабочего окружения."""
+        return self.environment == PRODUCTION_ENVIRONMENT
+
+    @property
+    def show_api_docs(self) -> bool:
+        """Нужно ли отдавать интерактивную документацию API."""
+        if self.enable_api_docs is not None:
+            return self.enable_api_docs
+        return not self.is_production
+
+    @property
+    def admin_prefix(self) -> str:
+        """Путь панели без завершающего слэша."""
+        return self.admin_path_prefix.rstrip("/")
+
+    @property
+    def admin_networks(self) -> tuple[IPv4Network | IPv6Network, ...]:
+        """Разобранный список разрешённых сетей.
+
+        :raises ValueError: если сеть записана некорректно.
+        """
+        return tuple(
+            ip_network(item.strip(), strict=False)
+            for item in self.admin_allowed_networks.split(",")
+            if item.strip()
+        )
 
 
 @lru_cache

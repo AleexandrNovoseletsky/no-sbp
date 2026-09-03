@@ -24,6 +24,11 @@ services:
       resources:
         limits:
           memory: 1g
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
 
   api:
     image: ${IMAGE:-nosbp:latest}
@@ -37,7 +42,8 @@ services:
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       DATABASE_URL: ${DATABASE_URL}
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-https://nosbp.ru}
-      ADMIN_PATH_PREFIX: ${ADMIN_PATH_PREFIX:-/admin}
+      ADMIN_PATH_PREFIX: ${ADMIN_PATH_PREFIX:-/console}
+      ADMIN_ALLOWED_NETWORKS: ${ADMIN_ALLOWED_NETWORKS:-}
       ADMIN_REQUIRE_TOTP: ${ADMIN_REQUIRE_TOTP:-true}
       ADMIN_COOKIE_SECURE: ${ADMIN_COOKIE_SECURE:-true}
       S3_ENDPOINT_URL: ${S3_ENDPOINT_URL}
@@ -53,6 +59,12 @@ services:
       resources:
         limits:
           memory: 512m
+    logging:
+      # Без ограничения журнал контейнера растёт до заполнения диска.
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
 
 volumes:
   # Именованный том: данные живут отдельно от контейнера и переживают

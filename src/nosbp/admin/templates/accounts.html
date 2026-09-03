@@ -23,10 +23,9 @@
      class="{{ 'active' if period != 'month' else '' }}">За всё время</a>
 </div>
 
-<form method="get" action="{{ admin_prefix }}/" class="actions" style="margin:0 0 16px">
+<form method="get" action="{{ admin_prefix }}/" class="actions flush">
   <input type="hidden" name="period" value="{{ period }}">
-  <input type="text" name="q" value="{{ search }}" placeholder="Поиск по почте или названию"
-         style="max-width:320px">
+  <input type="text" name="q" value="{{ search }}" placeholder="Поиск по почте или названию" class="field-search">
   <button type="submit" class="ghost">Найти</button>
   <a class="btn" href="{{ admin_prefix }}/accounts/new">Добавить заказчика</a>
 </form>
@@ -63,7 +62,7 @@
           <span class="muted">—</span>
         {% else %}
           {{ format_roubles(row.account.balance_kopecks) }}
-          {% if row.account.overdraft_until %}<div class="muted" style="font-size:11px">в долг</div>{% endif %}
+          {% if row.account.overdraft_until %}<div class="muted hint-small">в долг</div>{% endif %}
         {% endif %}
       </td>
       <td class="num">{{ row.invoice_count }}</td>

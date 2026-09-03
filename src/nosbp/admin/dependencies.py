@@ -33,7 +33,7 @@ def build_templates(settings: Settings) -> Jinja2Templates:
     """
     templates = Jinja2Templates(directory=Path(__file__).parent / TEMPLATES_DIRECTORY)
     templates.env.globals.update(
-        admin_prefix=settings.admin_path_prefix.rstrip("/"),
+        admin_prefix=settings.admin_prefix,
         csrf_field=CSRF_FIELD_NAME,
         format_roubles=format_roubles,
         format_fee_percent=format_fee_percent,

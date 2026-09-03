@@ -1,16 +1,16 @@
 {% extends "base.html" %}
 {% block title %}Вход — NoSBP{% endblock %}
 {% block content %}
-<div class="card" style="max-width:420px; margin:60px auto">
+<div class="card card-narrow">
   <h1>Панель NoSBP</h1>
   <p class="sub">Вход только для администраторов сервиса.</p>
   <form method="post" action="{{ admin_prefix }}/login">
-    <div class="field" style="margin-bottom:14px">
+    <div class="field spaced">
       <label for="email">Почта</label>
       <input id="email" type="email" name="email" value="{{ email | default('') }}"
              required autocomplete="username" autofocus>
     </div>
-    <div class="field" style="margin-bottom:14px">
+    <div class="field spaced">
       <label for="password">Пароль</label>
       <input id="password" type="password" name="password" required
              autocomplete="current-password">

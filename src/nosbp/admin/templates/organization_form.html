@@ -8,7 +8,7 @@
 <h1>{{ organization.name if organization else 'Новая организация' }}</h1>
 <p class="sub">Заказчик: <a href="{{ admin_prefix }}/accounts/{{ account.id }}">{{ account.display_name }}</a></p>
 
-<div class="card" style="max-width:820px">
+<div class="card card-wide">
 <form method="post" action="{{ action }}" enctype="multipart/form-data">
   <input type="hidden" name="{{ csrf_field }}" value="{{ csrf }}">
 
@@ -25,8 +25,8 @@
     </div>
   </div>
 
-  <h2 style="margin:24px 0 12px">Реквизиты</h2>
-  <p class="sub" style="margin-bottom:14px">Счёт и корр. счёт проверяются
+  <h2>Реквизиты</h2>
+  <p class="sub">Счёт и корр. счёт проверяются
      по контрольному разряду для указанного БИК — опечатка не пройдёт.</p>
 
   <div class="grid two">
@@ -61,7 +61,7 @@
     </div>
   </div>
 
-  <h2 style="margin:24px 0 12px">Подсчёт экономии</h2>
+  <h2>Подсчёт экономии</h2>
   <div class="grid two">
     <div class="field">
       <label for="fee_percent">Ставка эквайринга, %</label>
@@ -76,19 +76,19 @@
     </div>
   </div>
 
-  <h2 style="margin:24px 0 12px">Оформление</h2>
+  <h2>Оформление</h2>
   <div class="grid two">
     <div class="field">
       <label for="qr_color">Цвет модулей QR</label>
       <div class="colorline">
         <input id="qr_color" type="color" name="qr_color" value="{{ form.qr_color }}">
-        <output id="qr_color_hint" class="muted"></output>
+        <output id="qr_color_hint" class="muted hint"></output>
       </div>
     </div>
     <div class="field">
       <label for="logo">Логотип в центре кода</label>
       <input id="logo" type="file" name="logo" accept="image/png,image/jpeg">
-      <div class="muted" style="font-size:12px; margin-top:4px">
+      <div class="muted hint">
         {% if organization and organization.logo_key %}
           Загружен. Выберите файл, чтобы заменить.
         {% else %}
@@ -110,44 +110,4 @@
 </form>
 </div>
 
-<script>
-// Контраст цвета к белому фону по формуле WCAG — та же, что проверяет
-// сервер. Считаем здесь только чтобы предупредить до отправки формы:
-// узнать о слишком светлом цвете после заполнения всех реквизитов
-// обидно, даже когда форма возвращается заполненной.
-(function () {
-  var MIN_CONTRAST = 3.0;
-  var input = document.getElementById("qr_color");
-  var hint = document.getElementById("qr_color_hint");
-  if (!input || !hint) { return; }
-
-  function toLinear(channel) {
-    var srgb = channel / 255;
-    return srgb <= 0.04045 ? srgb / 12.92 : Math.pow((srgb + 0.055) / 1.055, 2.4);
-  }
-
-  function contrast(hex) {
-    var value = parseInt(hex.slice(1), 16);
-    var luminance =
-      0.2126 * toLinear((value >> 16) & 255) +
-      0.7152 * toLinear((value >> 8) & 255) +
-      0.0722 * toLinear(value & 255);
-    return 1.05 / (luminance + 0.05);
-  }
-
-  function update() {
-    var ratio = contrast(input.value);
-    if (ratio < MIN_CONTRAST) {
-      hint.textContent = "Слишком светлый — код не отсканируется";
-      hint.className = "warn-text";
-    } else {
-      hint.textContent = "Контраст " + ratio.toFixed(1) + " — годится";
-      hint.className = "muted";
-    }
-  }
-
-  input.addEventListener("input", update);
-  update();
-})();
-</script>
 {% endblock %}

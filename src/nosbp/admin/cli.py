@@ -1,8 +1,8 @@
 """Консольные команды управления администраторами.
 
-Администратор заводится только отсюда: регистрации через веб нет и быть
-не должно — панель распоряжается чужими деньгами. Тот, у кого есть доступ
-к серверу, и так внутри периметра; всем остальным входа нет.
+Учётные записи администраторов создаются только из консоли: регистрация
+через веб-интерфейс не предусмотрена, поскольку панель управляет
+балансами заказчиков.
 """
 
 import argparse
@@ -51,8 +51,8 @@ def _ask_password() -> str:
 def _print_totp(secret: str, email: str) -> None:
     """Печатает секрет и QR для приложения-аутентификатора.
 
-    QR рисуется прямо в терминале — тем же segno, которым сервис делает
-    платёжные коды. Не нужно ни пересылать картинку, ни открывать браузер.
+    QR-код выводится в терминал средствами segno, что избавляет от
+    необходимости передавать изображение отдельным каналом.
     """
     uri = totp_provisioning_uri(secret, email)
 
@@ -106,8 +106,7 @@ async def cmd_admin_create(args: argparse.Namespace) -> None:
 
     settings = get_settings()
     base_url = settings.public_base_url.rstrip("/")
-    prefix = settings.admin_path_prefix.rstrip("/")
-    print(f"\nВход: {base_url}{prefix}/login")
+    print(f"\nВход: {base_url}{settings.admin_prefix}/login")
 
 
 async def cmd_admin_list(args: argparse.Namespace) -> None:
@@ -242,8 +241,8 @@ def register_admin_commands(subparsers: argparse._SubParsersAction) -> None:  # 
 def require_tty() -> None:
     """Проверяет, что команда запущена в терминале.
 
-    Ввод пароля без терминала невозможен, а молча взять его из потока —
-    значит оставить пароль в истории команд.
+    Пароль запрашивается интерактивно; чтение из стандартного ввода
+    привело бы к его сохранению в истории команд.
     """
     if not sys.stdin.isatty():
         raise SystemExit(

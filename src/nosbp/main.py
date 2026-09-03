@@ -3,24 +3,29 @@
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from importlib.metadata import PackageNotFoundError, version
+from pathlib import Path
 from typing import Final
 from urllib.parse import urlencode
 
 import structlog
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
 
 from nosbp.admin.dependencies import build_templates
 from nosbp.admin.routes import router as admin_router
 from nosbp.core.config import Settings, get_settings
 from nosbp.core.errors import AdminAuthError, NosbpError
 from nosbp.core.logging import configure_logging
+from nosbp.core.middleware import configure_middleware
 from nosbp.db.session import dispose_engine
 from nosbp.payments.routes import router as payments_router
 from nosbp.storage.logo_cache import LogoCache
 from nosbp.storage.s3 import S3Storage
 
 log = structlog.get_logger()
+
+ADMIN_STATIC_DIRECTORY: Final[Path] = Path(__file__).parent / "admin" / "static"
 
 PACKAGE_NAME: Final[str] = "nosbp"
 FALLBACK_VERSION: Final[str] = "0.0.0"
@@ -66,11 +71,11 @@ def build_logo_cache(app: FastAPI, settings: Settings) -> LogoCache:
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Готовит и освобождает ресурсы приложения.
 
-    Схема базы данных здесь НЕ создаётся: за неё отвечает Alembic.
-    Приложение, создающее таблицы само, рано или поздно разойдётся
-    с миграциями, и на проде это обнаружится в худший момент.
+    Схема базы данных здесь не создаётся: за неё отвечает Alembic.
+    Приложение, создающее таблицы самостоятельно, со временем расходится
+    с историей миграций.
     """
-    settings = get_settings()
+    settings: Settings = app.state.settings
     app.state.logo_cache = build_logo_cache(app, settings)
     app.state.admin_templates = build_templates(settings)
 
@@ -80,13 +85,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     log.info("service_stopped")
 
 
-def create_app() -> FastAPI:
+def create_app(settings: Settings | None = None) -> FastAPI:
     """Собирает приложение.
 
-    Фабрика, а не глобальный объект: так тесты могут поднять отдельный
-    экземпляр с другими настройками, не перезагружая модуль.
+    :param settings: конфигурация. По умолчанию берётся из окружения;
+        явная передача используется в тестах.
     """
-    settings = get_settings()
+    settings = settings or get_settings()
     configure_logging(json_logs=not settings.is_local, log_level=settings.log_level)
 
     app = FastAPI(
@@ -94,7 +99,18 @@ def create_app() -> FastAPI:
         description=DESCRIPTION,
         version=get_version(),
         lifespan=lifespan,
+        # В рабочем окружении интерактивная документация не отдаётся:
+        # она раскрывает состав и параметры эндпоинтов.
+        docs_url="/docs" if settings.show_api_docs else None,
+        redoc_url="/redoc" if settings.show_api_docs else None,
+        openapi_url="/openapi.json" if settings.show_api_docs else None,
     )
+    app.state.settings = settings
+    configure_middleware(app, settings)
+
+    # Зависимости обращаются к настройкам через get_settings; подмена
+    # гарантирует, что маршруты видят ту же конфигурацию, что и фабрика.
+    app.dependency_overrides[get_settings] = lambda: settings
 
     @app.exception_handler(AdminAuthError)
     async def handle_admin_auth(
@@ -105,9 +121,10 @@ def create_app() -> FastAPI:
         Панель — это обычные страницы в браузере: администратор должен
         увидеть форму входа, а не JSON с ошибкой.
         """
-        prefix = settings.admin_path_prefix.rstrip("/")
         query = urlencode({"err": exc.message})
-        return RedirectResponse(f"{prefix}/login?{query}", status_code=SEE_OTHER)
+        return RedirectResponse(
+            f"{settings.admin_prefix}/login?{query}", status_code=SEE_OTHER
+        )
 
     @app.exception_handler(NosbpError)
     async def handle_domain_error(request: Request, exc: NosbpError) -> JSONResponse:
@@ -127,7 +144,12 @@ def create_app() -> FastAPI:
         return {"status": "ok"}
 
     app.include_router(payments_router)
-    app.include_router(admin_router, prefix=settings.admin_path_prefix.rstrip("/"))
+    app.include_router(admin_router, prefix=settings.admin_prefix)
+    app.mount(
+        f"{settings.admin_prefix}/static",
+        StaticFiles(directory=ADMIN_STATIC_DIRECTORY),
+        name="admin-static",
+    )
     return app
 
 

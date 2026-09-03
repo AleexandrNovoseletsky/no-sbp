@@ -1,7 +1,7 @@
-"""Страницы панели управления.
+"""HTTP-эндпоинты панели управления.
 
-Обычные серверные формы без сборщика и без JavaScript: панелью пользуется
-один человек, и любая машинерия сверх этого была бы платой без выгоды.
+Страницы формируются на сервере из шаблонов Jinja2. Клиентский код
+ограничен подсказками в формах и вынесен в статические файлы.
 """
 
 import uuid
@@ -52,8 +52,10 @@ router = APIRouter(tags=["admin"], include_in_schema=False)
 log = structlog.get_logger()
 
 SEE_OTHER: Final = 303
-"""После POST положено отвечать редиректом, иначе обновление страницы
-повторяет операцию — а операции здесь денежные."""
+"""Код ответа после успешной обработки формы.
+
+Перенаправление после POST исключает повторное выполнение операции при
+обновлении страницы."""
 
 LEDGER_PAGE_SIZE: Final = 50
 
@@ -88,14 +90,10 @@ EMPTY_BALANCE_FORM: Final[dict[str, str | bool]] = {
 # ---------------------------------------------------------------------------
 
 
-def _prefix(settings: Settings) -> str:
-    return settings.admin_path_prefix.rstrip("/")
-
-
 def _redirect(settings: Settings, path: str, **flash: str) -> RedirectResponse:
     """Перенаправляет внутрь панели, передав сообщение через адрес."""
     query = urlencode({key: value for key, value in flash.items() if value})
-    target = f"{_prefix(settings)}{path}"
+    target = f"{settings.admin_prefix}{path}"
     return RedirectResponse(f"{target}?{query}" if query else target, SEE_OTHER)
 
 
@@ -125,8 +123,8 @@ def _page(
 ) -> Response:
     """Отрисовывает страницу, добавив общие для всех шаблонов значения.
 
-    Токен CSRF подставляется сам: забыть его в одном шаблоне — значит
-    получить форму, которая молча не работает.
+    Токен CSRF добавляется в контекст автоматически, чтобы его нельзя
+    было пропустить при добавлении нового шаблона.
     """
     return templates.TemplateResponse(
         request,
@@ -169,12 +167,10 @@ OrganizationFields = Annotated[str, Form()]
 """Поле формы организации: всё приходит строками, как их прислал браузер."""
 
 FormValues = dict[str, str | bool]
-"""Значения формы для повторной отрисовки.
+"""Значения полей формы.
 
-Шаблон всегда читает поля отсюда, а не из модели. Благодаря этому после
-ошибки — светлый цвет, опечатка в счёте, занятое короткое имя — форма
-возвращается заполненной, и восемь полей реквизитов не приходится
-набирать заново.
+Шаблоны читают значения отсюда, а не из модели: при ошибке валидации
+форма возвращается заполненной введёнными данными.
 """
 
 
@@ -363,7 +359,7 @@ async def login(
         httponly=True,
         secure=settings.admin_cookie_secure,
         samesite="strict",
-        path=_prefix(settings) or "/",
+        path=settings.admin_prefix or "/",
     )
     return response
 
@@ -384,7 +380,7 @@ async def logout(
         request.cookies.get(SESSION_COOKIE_NAME)
     )
     response = _redirect(settings, "/login", ok="Вы вышли из панели.")
-    response.delete_cookie(SESSION_COOKIE_NAME, path=_prefix(settings) or "/")
+    response.delete_cookie(SESSION_COOKIE_NAME, path=settings.admin_prefix or "/")
     return response
 
 

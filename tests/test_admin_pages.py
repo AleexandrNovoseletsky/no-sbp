@@ -3,9 +3,15 @@
 from sqlalchemy import select
 
 from nosbp.db.models import Account, ApiToken, LedgerEntry, Organization
-from tests.factories import BIC, CORRESP_ACC, INN_COMPANY, PERSONAL_ACC
+from tests.factories import (
+    ADMIN_PREFIX,
+    BIC,
+    CORRESP_ACC,
+    INN_COMPANY,
+    PERSONAL_ACC,
+)
 
-ADMIN = "/admin"
+ADMIN = ADMIN_PREFIX
 
 
 def org_form(csrf: str, **overrides: object) -> dict[str, object]:
@@ -485,11 +491,7 @@ async def test_form_with_wrong_csrf_is_refused(logged_in, session, make_account)
 
 
 async def test_organization_form_keeps_input_after_error(logged_in, make_account):
-    """Ошибка в одном поле не должна стирать восемь заполненных.
-
-    Ровно тот случай, на котором споткнулись: реквизиты введены, цвет
-    выбран слишком светлый — и форма возвращается пустой.
-    """
+    """Ошибка валидации не должна очищать остальные поля формы."""
     panel, _, csrf = logged_in
     account = await make_account()
 

@@ -100,7 +100,7 @@ async def test_repeated_request_does_not_add_an_operation(
 async def test_savings_use_the_organization_fee(
     session, make_account, make_organization
 ):
-    """Ваш же случай: чек 47 000 ₽ при ставке 0,7 % — это 329 ₽ комиссии."""
+    """Чек 47 000 ₽ при ставке 0,7 % даёт 329 ₽ комиссии эквайринга."""
     account = await make_account(balance_rubles=1000)
     organization = await make_organization(account, acquiring_fee_bps=70)
 
