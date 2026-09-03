@@ -35,10 +35,12 @@ from nosbp.core.constants import (
     ALIAS_MAX_LENGTH,
     BANK_NAME_MAX_LENGTH,
     BIC_LENGTH,
+    DEFAULT_ACQUIRING_FEE_BPS,
     DEFAULT_QR_COLOR,
     DISPLAY_NAME_MAX_LENGTH,
     EMAIL_MAX_LENGTH,
     INN_LENGTHS,
+    IP_ADDRESS_MAX_LENGTH,
     KPP_LENGTH,
     NAME_MAX_LENGTH,
     PASSWORD_HASH_MAX_LENGTH,
@@ -187,7 +189,9 @@ class Organization(Base):
     """
 
     # ---- Для подсчёта экономии -----------------------------------------
-    acquiring_fee_bps: Mapped[int] = mapped_column(Integer, default=70)
+    acquiring_fee_bps: Mapped[int] = mapped_column(
+        Integer, default=DEFAULT_ACQUIRING_FEE_BPS
+    )
     """Ставка эквайринга в базисных пунктах: 70 — это 0,7 %.
 
     У каждой организации своя: тарифы банков различаются, а у одного
@@ -454,8 +458,7 @@ class AdminSession(Base):
         DateTime(timezone=True), default=None
     )
 
-    ip_address: Mapped[str] = mapped_column(String(45), default="")
-    """IPv6 в текстовом виде занимает до 45 символов."""
+    ip_address: Mapped[str] = mapped_column(String(IP_ADDRESS_MAX_LENGTH), default="")
 
     user_agent: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[datetime.datetime] = created_at_column()

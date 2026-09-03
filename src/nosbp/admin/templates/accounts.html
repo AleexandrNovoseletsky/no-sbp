@@ -2,8 +2,14 @@
 {% block title %}Заказчики — NoSBP{% endblock %}
 {% block content %}
 <h1>Заказчики</h1>
-<p class="sub">Всего {{ rows | length }}. Экономия считается по ставке эквайринга,
-   заданной у каждой организации.</p>
+<p class="sub">
+  {% if rows | length >= page_size %}
+    Показаны первые {{ page_size }}. Уточните поиск, чтобы найти нужного.
+  {% else %}
+    Всего {{ rows | length }}.
+  {% endif %}
+  Экономия считается по ставке эквайринга, заданной у каждой организации.
+</p>
 
 <div class="kpi">
   <div><div class="n">{{ total_invoices }}</div><div class="l">уникальных операций</div></div>

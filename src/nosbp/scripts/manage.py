@@ -13,7 +13,6 @@ import argparse
 import asyncio
 import sys
 import uuid
-from collections.abc import Mapping
 from pathlib import Path
 from typing import Final
 
@@ -22,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from nosbp.admin import crud
 from nosbp.admin.cli import register_admin_commands
+from nosbp.admin.logos import store_logo
 from nosbp.admin.stats import format_fee_percent, parse_fee_percent
 from nosbp.billing.service import BillingService, calculate_balance_from_ledger
 from nosbp.core.config import Settings, get_settings
@@ -32,13 +32,6 @@ from nosbp.db.base import utcnow
 from nosbp.db.models import Account, ApiToken, LedgerEntry
 from nosbp.db.session import dispose_engine, get_session_factory
 from nosbp.storage.s3 import S3Storage
-
-LOGO_CONTENT_TYPES: Final[Mapping[str, str]] = {
-    ".png": "image/png",
-    ".jpg": "image/jpeg",
-    ".jpeg": "image/jpeg",
-}
-"""Какие форматы логотипа принимаются и с каким типом кладутся в хранилище."""
 
 DEFAULT_STATEMENT_LIMIT: Final = 20
 DATETIME_FORMAT: Final[str] = "%d.%m.%Y %H:%M"
@@ -146,26 +139,22 @@ async def cmd_org_add(args: argparse.Namespace) -> None:
 async def _upload_logo(path: Path, account_id: uuid.UUID) -> str:
     """Кладёт логотип в объектное хранилище и возвращает его ключ.
 
-    Файл читается синхронно: это разовая консольная команда, блокировать
-    здесь нечего.
+    Проверки — те же, что в панели: формат, размер и то, что файл
+    действительно читается как картинка.
     """
     if not path.exists():  # noqa: ASYNC240
         raise SystemExit(f"Файл логотипа не найден: {path}")
 
-    content_type = LOGO_CONTENT_TYPES.get(path.suffix.lower())
-    if content_type is None:
-        supported = ", ".join(sorted(LOGO_CONTENT_TYPES))
-        raise SystemExit(f"Логотип должен быть в одном из форматов: {supported}.")
-
-    storage = S3Storage(get_settings())
+    settings = get_settings()
+    storage = S3Storage(settings)
     storage.ensure_bucket()
-    key = f"logos/{account_id}/{uuid.uuid4().hex}{path.suffix.lower()}"
-    await storage.put(
-        key,
-        path.read_bytes(),  # noqa: ASYNC240
-        content_type=content_type,
+    return await store_logo(
+        storage=storage,
+        account_id=account_id,
+        filename=path.name,
+        data=path.read_bytes(),  # noqa: ASYNC240
+        max_bytes=settings.logo_max_bytes,
     )
-    return key
 
 
 async def cmd_token_issue(args: argparse.Namespace) -> None:

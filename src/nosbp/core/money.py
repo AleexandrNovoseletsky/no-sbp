@@ -36,6 +36,18 @@ def format_roubles(kopecks: int, *, fractional: bool = True) -> str:
     return f"{roubles:.2f} ₽" if fractional else f"{roubles:.0f} ₽"
 
 
+def roubles_input(kopecks: int | None) -> str:
+    """Готовит сумму для поля ввода: «1000.00» или пустая строка.
+
+    Отдельно от :func:`format_roubles`, потому что в поле не должно быть
+    ни знака валюты, ни разделителей разрядов — иначе браузер вернёт
+    строку, которую же сам и не разберёт.
+    """
+    if kopecks is None:
+        return ""
+    return f"{to_roubles(kopecks):.2f}"
+
+
 def parse_roubles(text: str) -> int:
     """Разбирает введённую человеком сумму в рублях и переводит в копейки.
 

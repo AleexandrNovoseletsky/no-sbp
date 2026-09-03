@@ -5,20 +5,30 @@
 """
 
 import uuid
+from enum import StrEnum
 from typing import Annotated, Final
 from urllib.parse import urlencode
 
 import structlog
-from fastapi import APIRouter, Form, Request, Response
+from fastapi import APIRouter, File, Form, Request, Response, UploadFile
 from fastapi.responses import RedirectResponse
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from nosbp.admin import crud
-from nosbp.admin.dependencies import CsrfProtected, CurrentAdmin, Templates
+from nosbp.admin.dependencies import (
+    AdminContext,
+    CsrfProtected,
+    CurrentAdmin,
+    LogoCacheDep,
+    Templates,
+)
+from nosbp.admin.logos import store_logo
 from nosbp.admin.security import SESSION_COOKIE_NAME
 from nosbp.admin.service import AdminAuthService
 from nosbp.admin.stats import (
     collect_account_stats,
+    collect_many_account_stats,
     format_fee_percent,
     month_start,
     parse_fee_percent,
@@ -32,10 +42,11 @@ from nosbp.core.errors import (
     NosbpError,
     ValidationError,
 )
-from nosbp.core.money import format_roubles, parse_roubles
+from nosbp.core.money import format_roubles, parse_roubles, roubles_input
 from nosbp.db.base import utcnow
-from nosbp.db.models import ApiToken, LedgerEntry, Organization
+from nosbp.db.models import Account, ApiToken, LedgerEntry, Organization
 from nosbp.payments.dependencies import AppSettings, DbSession
+from nosbp.storage.logo_cache import LogoCache
 
 router = APIRouter(tags=["admin"], include_in_schema=False)
 log = structlog.get_logger()
@@ -45,7 +56,31 @@ SEE_OTHER: Final = 303
 повторяет операцию — а операции здесь денежные."""
 
 LEDGER_PAGE_SIZE: Final = 50
-UNLIMITED_LABEL: Final[str] = "без ограничения"
+
+PERIOD_MONTH: Final[str] = "month"
+"""Период по умолчанию — текущий календарный месяц."""
+
+
+class BalanceOperation(StrEnum):
+    """Что делает форма операций по балансу."""
+
+    TOPUP = "topup"
+    REFUND = "refund"
+    ADJUST = "adjust"
+
+
+EMPTY_ACCOUNT_FORM: Final[dict[str, str | bool]] = {
+    "email": "",
+    "display_name": "",
+    "daily_limit": "",
+    "is_unlimited": False,
+}
+
+EMPTY_BALANCE_FORM: Final[dict[str, str | bool]] = {
+    "operation": BalanceOperation.TOPUP,
+    "amount": "",
+    "comment": "",
+}
 
 
 # ---------------------------------------------------------------------------
@@ -65,7 +100,13 @@ def _redirect(settings: Settings, path: str, **flash: str) -> RedirectResponse:
 
 
 def _client_ip(request: Request) -> str:
-    """Определяет адрес клиента с учётом обратного прокси."""
+    """Определяет адрес клиента с учётом обратного прокси.
+
+    Заголовку X-Forwarded-For можно верить только потому, что снаружи
+    сервис доступен исключительно через собственный прокси: он этот
+    заголовок и проставляет, перетирая присланный клиентом. Значение
+    используется в логах, не в проверках доступа.
+    """
     forwarded = request.headers.get("x-forwarded-for", "")
     if forwarded:
         return forwarded.split(",")[0].strip()
@@ -77,21 +118,46 @@ def _page(
     request: Request,
     name: str,
     settings: Settings,
+    *,
+    admin: AdminContext | None = None,
+    err: str = "",
     **context: object,
 ) -> Response:
-    """Отрисовывает страницу, добавив общие для всех шаблонов значения."""
+    """Отрисовывает страницу, добавив общие для всех шаблонов значения.
+
+    Токен CSRF подставляется сам: забыть его в одном шаблоне — значит
+    получить форму, которая молча не работает.
+    """
     return templates.TemplateResponse(
         request,
         name,
         {
             "settings": settings,
+            "admin": admin,
+            "csrf": admin.csrf_token if admin is not None else "",
             "ok": request.query_params.get("ok", ""),
-            "err": request.query_params.get("err", ""),
-            "format_roubles": format_roubles,
-            "format_fee_percent": format_fee_percent,
+            "err": err or request.query_params.get("err", ""),
             **context,
         },
     )
+
+
+def _error_text(error: Exception) -> str:
+    """Достаёт человеческий текст из доменной ошибки или из ValueError."""
+    return error.message if isinstance(error, NosbpError) else str(error)
+
+
+async def _reload(db: AsyncSession, *instances: object) -> None:
+    """Перечитывает объекты после отката транзакции.
+
+    Откат помечает все загруженные объекты устаревшими. Шаблон, дойдя
+    до такого объекта, попытался бы сходить за ним в базу посреди
+    отрисовки — а синхронный Jinja этого сделать не может и падает.
+    Поэтому всё, что попадёт на страницу, перечитывается заранее.
+    """
+    for instance in instances:
+        if instance is not None:
+            await db.refresh(instance)
 
 
 def _checkbox(value: str | None) -> bool:
@@ -102,8 +168,57 @@ def _checkbox(value: str | None) -> bool:
 OrganizationFields = Annotated[str, Form()]
 """Поле формы организации: всё приходит строками, как их прислал браузер."""
 
+FormValues = dict[str, str | bool]
+"""Значения формы для повторной отрисовки.
 
-def _organization_input(
+Шаблон всегда читает поля отсюда, а не из модели. Благодаря этому после
+ошибки — светлый цвет, опечатка в счёте, занятое короткое имя — форма
+возвращается заполненной, и восемь полей реквизитов не приходится
+набирать заново.
+"""
+
+
+def _organization_values(
+    organization: Organization | None, settings: Settings
+) -> FormValues:
+    """Готовит значения формы организации: из модели или пустые."""
+    if organization is None:
+        return {
+            "alias": "",
+            "name": "",
+            "personal_acc": "",
+            "bank_name": "",
+            "bic": "",
+            "corresp_acc": "",
+            "payee_inn": "",
+            "kpp": "",
+            "qr_color": DEFAULT_QR_COLOR,
+            "fee_percent": _fee_input(settings.default_acquiring_fee_bps),
+            "average_check": "",
+            "is_default": False,
+        }
+    return {
+        "alias": organization.alias,
+        "name": organization.name,
+        "personal_acc": organization.personal_acc,
+        "bank_name": organization.bank_name,
+        "bic": organization.bic,
+        "corresp_acc": organization.corresp_acc,
+        "payee_inn": organization.payee_inn,
+        "kpp": organization.kpp or "",
+        "qr_color": organization.qr_color,
+        "fee_percent": _fee_input(organization.acquiring_fee_bps),
+        "average_check": roubles_input(organization.average_check_kopecks),
+        "is_default": organization.is_default,
+    }
+
+
+def _fee_input(bps: int) -> str:
+    """Ставка для поля ввода: «0,7» без знака процента."""
+    return format_fee_percent(bps).replace(" %", "")
+
+
+def _submitted_values(
     *,
     alias: str,
     name: str,
@@ -117,9 +232,28 @@ def _organization_input(
     fee_percent: str,
     average_check: str,
     is_default: str | None,
-    default_fee_bps: int,
+) -> FormValues:
+    """Собирает то, что человек ввёл, — для повторной отрисовки формы."""
+    return {
+        "alias": alias,
+        "name": name,
+        "personal_acc": personal_acc,
+        "bank_name": bank_name,
+        "bic": bic,
+        "corresp_acc": corresp_acc,
+        "payee_inn": payee_inn,
+        "kpp": kpp,
+        "qr_color": qr_color,
+        "fee_percent": fee_percent,
+        "average_check": average_check,
+        "is_default": _checkbox(is_default),
+    }
+
+
+def _organization_input(
+    values: FormValues, default_fee_bps: int
 ) -> crud.RequisitesInput:
-    """Собирает из полей формы проверяемый набор реквизитов.
+    """Переводит значения формы в проверяемый набор реквизитов.
 
     Ставка и средний чек разбираются здесь, а не схемой FastAPI: ошибка
     ввода должна превращаться в понятный текст, а не в стандартный ответ
@@ -127,24 +261,61 @@ def _organization_input(
 
     :raises ValueError: если ставка или средний чек введены неверно.
     """
+    fee_percent = str(values["fee_percent"]).strip()
+    average_check = str(values["average_check"]).strip()
+
     return crud.RequisitesInput(
-        alias=alias,
-        name=name,
-        personal_acc=personal_acc,
-        bank_name=bank_name,
-        bic=bic,
-        corresp_acc=corresp_acc,
-        payee_inn=payee_inn,
-        kpp=kpp or None,
-        qr_color=qr_color,
+        alias=str(values["alias"]),
+        name=str(values["name"]),
+        personal_acc=str(values["personal_acc"]),
+        bank_name=str(values["bank_name"]),
+        bic=str(values["bic"]),
+        corresp_acc=str(values["corresp_acc"]),
+        payee_inn=str(values["payee_inn"]),
+        kpp=str(values["kpp"]) or None,
+        qr_color=str(values["qr_color"]),
         acquiring_fee_bps=(
-            parse_fee_percent(fee_percent) if fee_percent.strip() else default_fee_bps
+            parse_fee_percent(fee_percent) if fee_percent else default_fee_bps
         ),
-        average_check_kopecks=(
-            parse_roubles(average_check) if average_check.strip() else None
-        ),
-        is_default=_checkbox(is_default),
+        average_check_kopecks=(parse_roubles(average_check) if average_check else None),
+        is_default=bool(values["is_default"]),
     )
+
+
+async def _attach_logo(
+    organization: Organization,
+    upload: UploadFile | None,
+    settings: Settings,
+    logo_cache: LogoCache,
+) -> None:
+    """Кладёт присланный логотип в хранилище и привязывает его к организации.
+
+    Пустое поле файла браузер всё равно присылает — с пустым именем;
+    такой «файл» игнорируется, иначе сохранение формы без выбора файла
+    стирало бы прежний логотип.
+
+    :raises ValidationError: если формат не поддерживается, файл слишком
+        большой или это вовсе не картинка.
+    """
+    if upload is None or not upload.filename:
+        return
+
+    data = await upload.read()
+    key = await store_logo(
+        storage=logo_cache.storage,
+        account_id=organization.account_id,
+        filename=upload.filename,
+        data=data,
+        max_bytes=settings.logo_max_bytes,
+    )
+
+    previous = organization.logo_key
+    organization.logo_key = key
+
+    # Кэш держит логотип в памяти процесса; без сброса организация
+    # ещё несколько минут показывала бы старую картинку.
+    if previous is not None:
+        logo_cache.invalidate(previous)
 
 
 @router.get("/login")
@@ -199,9 +370,16 @@ async def login(
 
 @router.post("/logout")
 async def logout(
-    request: Request, db: DbSession, settings: AppSettings
+    request: Request,
+    db: DbSession,
+    settings: AppSettings,
+    admin: CsrfProtected,
 ) -> RedirectResponse:
-    """Закрывает сессию."""
+    """Закрывает сессию.
+
+    Тоже под защитой токена: без неё чужая страница могла бы выкидывать
+    администратора из панели на каждом заходе.
+    """
     await AdminAuthService(db, settings).close_session(
         request.cookies.get(SESSION_COOKIE_NAME)
     )
@@ -223,15 +401,12 @@ async def accounts_index(
     templates: Templates,
     admin: CurrentAdmin,
     q: str = "",
-    period: str = "month",
+    period: str = PERIOD_MONTH,
 ) -> Response:
     """Список заказчиков с балансом и экономией."""
-    since = month_start(utcnow()) if period == "month" else None
+    since = month_start(utcnow()) if period == PERIOD_MONTH else None
     accounts = await crud.list_accounts(db, search=q)
-
-    rows = [
-        await collect_account_stats(db, account, since=since) for account in accounts
-    ]
+    rows = await collect_many_account_stats(db, accounts, since=since)
 
     return _page(
         templates,
@@ -244,6 +419,7 @@ async def accounts_index(
         period=period,
         total_savings=sum(row.savings_kopecks for row in rows),
         total_invoices=sum(row.invoice_count for row in rows),
+        page_size=crud.ACCOUNTS_PAGE_SIZE,
     )
 
 
@@ -258,7 +434,7 @@ async def account_new_form(
         "account_form.html",
         settings,
         admin=admin,
-        csrf=admin.csrf_token,
+        form=EMPTY_ACCOUNT_FORM,
     )
 
 
@@ -275,6 +451,13 @@ async def account_create(
     daily_limit: Annotated[str, Form()] = "",
 ) -> Response:
     """Заводит заказчика."""
+    submitted: FormValues = {
+        "email": email,
+        "display_name": display_name,
+        "daily_limit": daily_limit,
+        "is_unlimited": _checkbox(is_unlimited),
+    }
+
     try:
         limit = parse_roubles(daily_limit) if daily_limit.strip() else None
         account = await crud.create_account(
@@ -289,17 +472,14 @@ async def account_create(
         await db.commit()
     except (NosbpError, ValueError) as error:
         await db.rollback()
-        message = error.message if isinstance(error, NosbpError) else str(error)
         return _page(
             templates,
             request,
             "account_form.html",
             settings,
             admin=admin,
-            csrf=admin.csrf_token,
-            err=message,
-            email=email,
-            display_name=display_name,
+            err=_error_text(error),
+            form=submitted,
         )
 
     log.info("admin_account_created", admin=admin.email, account=account.email)
@@ -313,19 +493,25 @@ async def account_create(
 # ---------------------------------------------------------------------------
 
 
-@router.get("/accounts/{account_id}")
-async def account_detail(
+async def _render_account(
+    *,
     request: Request,
     db: DbSession,
-    settings: AppSettings,
+    settings: Settings,
     templates: Templates,
-    admin: CurrentAdmin,
-    account_id: uuid.UUID,
-    period: str = "month",
+    admin: AdminContext,
+    account: Account,
+    period: str,
+    err: str = "",
+    edit: FormValues | None = None,
+    balance: FormValues | None = None,
 ) -> Response:
-    """Карточка заказчика: организации, баланс, выписка, экономия."""
-    account = await crud.get_account(db, account_id)
-    since = month_start(utcnow()) if period == "month" else None
+    """Отрисовывает карточку заказчика.
+
+    Значения форм передаются отдельно от модели: после ошибки страница
+    возвращается с тем, что человек ввёл, а не с тем, что лежит в базе.
+    """
+    since = month_start(utcnow()) if period == PERIOD_MONTH else None
 
     ledger = await db.execute(
         select(LedgerEntry)
@@ -340,7 +526,7 @@ async def account_detail(
         "account.html",
         settings,
         admin=admin,
-        csrf=admin.csrf_token,
+        err=err,
         account=account,
         stats=await collect_account_stats(db, account, since=since),
         ledger=list(ledger.scalars()),
@@ -348,22 +534,66 @@ async def account_detail(
         tokens=await crud.list_tokens(db, account.id),
         period=period,
         issued_token=request.query_params.get("token", ""),
+        edit=edit or _account_values(account),
+        balance=balance or EMPTY_BALANCE_FORM,
+    )
+
+
+def _account_values(account: Account) -> FormValues:
+    """Значения формы карточки заказчика."""
+    return {
+        "display_name": account.display_name,
+        "daily_limit": roubles_input(account.daily_charge_limit_kopecks),
+        "is_active": account.is_active,
+        "is_unlimited": account.is_unlimited,
+    }
+
+
+@router.get("/accounts/{account_id}")
+async def account_detail(
+    request: Request,
+    db: DbSession,
+    settings: AppSettings,
+    templates: Templates,
+    admin: CurrentAdmin,
+    account_id: uuid.UUID,
+    period: str = PERIOD_MONTH,
+) -> Response:
+    """Карточка заказчика: организации, баланс, выписка, экономия."""
+    account = await crud.get_account(db, account_id)
+    return await _render_account(
+        request=request,
+        db=db,
+        settings=settings,
+        templates=templates,
+        admin=admin,
+        account=account,
+        period=period,
     )
 
 
 @router.post("/accounts/{account_id}/edit")
 async def account_edit(
+    request: Request,
     db: DbSession,
     settings: AppSettings,
+    templates: Templates,
     admin: CsrfProtected,
     account_id: uuid.UUID,
     display_name: Annotated[str, Form()],
     is_active: Annotated[str | None, Form()] = None,
     is_unlimited: Annotated[str | None, Form()] = None,
     daily_limit: Annotated[str, Form()] = "",
-) -> RedirectResponse:
+) -> Response:
     """Сохраняет карточку заказчика."""
     account = await crud.get_account(db, account_id)
+    submitted: FormValues = {
+        "display_name": display_name,
+        "daily_limit": daily_limit,
+        "is_active": _checkbox(is_active),
+        "is_unlimited": _checkbox(is_unlimited),
+    }
+
     try:
         limit = parse_roubles(daily_limit) if daily_limit.strip() else None
         await crud.update_account(
@@ -376,8 +606,18 @@ async def account_edit(
         await db.commit()
     except (NosbpError, ValueError) as error:
         await db.rollback()
-        message = error.message if isinstance(error, NosbpError) else str(error)
-        return _redirect(settings, f"/accounts/{account_id}", err=message)
+        await _reload(db, account)
+        return await _render_account(
+            request=request,
+            db=db,
+            settings=settings,
+            templates=templates,
+            admin=admin,
+            account=account,
+            period=PERIOD_MONTH,
+            err=_error_text(error),
+            edit=submitted,
+        )
 
     log.info("admin_account_updated", admin=admin.email, account=account.email)
     return _redirect(settings, f"/accounts/{account_id}", ok="Карточка сохранена.")
@@ -404,36 +644,53 @@ async def account_delete(
 
 @router.post("/accounts/{account_id}/balance")
 async def balance_operation(
+    request: Request,
     db: DbSession,
     settings: AppSettings,
+    templates: Templates,
     admin: CsrfProtected,
     account_id: uuid.UUID,
     operation: Annotated[str, Form()],
     amount: Annotated[str, Form()],
     comment: Annotated[str, Form()] = "",
-) -> RedirectResponse:
+) -> Response:
     """Пополняет, возвращает или корректирует баланс."""
     account = await crud.get_account(db, account_id)
     billing = BillingService(db, settings)
+    submitted: FormValues = {
+        "operation": operation,
+        "amount": amount,
+        "comment": comment,
+    }
 
     try:
         kopecks = parse_roubles(amount)
         locked = await billing.lock_account(account.id)
         text = comment.strip() or f"Операция администратора {admin.email}"
 
-        if operation == "topup":
+        if operation == BalanceOperation.TOPUP:
             await billing.topup(locked, kopecks, comment=text)
-        elif operation == "refund":
+        elif operation == BalanceOperation.REFUND:
             await billing.refund(locked, kopecks, comment=text)
-        elif operation == "adjust":
+        elif operation == BalanceOperation.ADJUST:
             await billing.adjust(locked, kopecks, comment=text)
         else:
-            raise ValueError(f"Неизвестная операция: {operation}")
+            raise ValidationError(f"Неизвестная операция: {operation}")
         await db.commit()
     except (NosbpError, ValueError) as error:
         await db.rollback()
-        message = error.message if isinstance(error, NosbpError) else str(error)
-        return _redirect(settings, f"/accounts/{account_id}", err=message)
+        await _reload(db, account)
+        return await _render_account(
+            request=request,
+            db=db,
+            settings=settings,
+            templates=templates,
+            admin=admin,
+            account=account,
+            period=PERIOD_MONTH,
+            err=_error_text(error),
+            balance=submitted,
+        )
 
     log.info(
         "admin_balance_operation",
@@ -515,17 +772,18 @@ async def organization_new_form(
         "organization_form.html",
         settings,
         admin=admin,
-        csrf=admin.csrf_token,
         account=account,
         organization=None,
-        default_fee_percent=format_fee_percent(settings.default_acquiring_fee_bps),
+        form=_organization_values(None, settings),
     )
 
 
 @router.post("/accounts/{account_id}/organizations/new")
 async def organization_create(
+    request: Request,
     db: DbSession,
     settings: AppSettings,
+    templates: Templates,
     admin: CsrfProtected,
     account_id: uuid.UUID,
     alias: OrganizationFields,
@@ -535,37 +793,49 @@ async def organization_create(
     bic: OrganizationFields,
     corresp_acc: OrganizationFields,
     payee_inn: OrganizationFields,
+    logo_cache: LogoCacheDep,
     kpp: OrganizationFields = "",
     qr_color: OrganizationFields = DEFAULT_QR_COLOR,
     fee_percent: OrganizationFields = "",
     average_check: OrganizationFields = "",
     is_default: Annotated[str | None, Form()] = None,
-) -> RedirectResponse:
+    logo: Annotated[UploadFile | None, File()] = None,
+) -> Response:
     """Добавляет организацию."""
     account = await crud.get_account(db, account_id)
+    submitted = _submitted_values(
+        alias=alias,
+        name=name,
+        personal_acc=personal_acc,
+        bank_name=bank_name,
+        bic=bic,
+        corresp_acc=corresp_acc,
+        payee_inn=payee_inn,
+        kpp=kpp,
+        qr_color=qr_color,
+        fee_percent=fee_percent,
+        average_check=average_check,
+        is_default=is_default,
+    )
+
     try:
-        data = _organization_input(
-            alias=alias,
-            name=name,
-            personal_acc=personal_acc,
-            bank_name=bank_name,
-            bic=bic,
-            corresp_acc=corresp_acc,
-            payee_inn=payee_inn,
-            kpp=kpp,
-            qr_color=qr_color,
-            fee_percent=fee_percent,
-            average_check=average_check,
-            is_default=is_default,
-            default_fee_bps=settings.default_acquiring_fee_bps,
-        )
+        data = _organization_input(submitted, settings.default_acquiring_fee_bps)
         organization = await crud.create_organization(db, account, data)
+        await _attach_logo(organization, logo, settings, logo_cache)
         await db.commit()
     except (NosbpError, ValueError) as error:
         await db.rollback()
-        message = error.message if isinstance(error, NosbpError) else str(error)
-        return _redirect(
-            settings, f"/accounts/{account_id}/organizations/new", err=message
+        await _reload(db, account)
+        return _page(
+            templates,
+            request,
+            "organization_form.html",
+            settings,
+            admin=admin,
+            err=_error_text(error),
+            account=account,
+            organization=None,
+            form=submitted,
         )
 
     log.info(
@@ -598,17 +868,18 @@ async def organization_edit_form(
         "organization_form.html",
         settings,
         admin=admin,
-        csrf=admin.csrf_token,
         account=account,
         organization=organization,
-        default_fee_percent=format_fee_percent(settings.default_acquiring_fee_bps),
+        form=_organization_values(organization, settings),
     )
 
 
 @router.post("/organizations/{organization_id}/edit")
 async def organization_update(
+    request: Request,
     db: DbSession,
     settings: AppSettings,
+    templates: Templates,
     admin: CsrfProtected,
     organization_id: uuid.UUID,
     alias: OrganizationFields,
@@ -618,44 +889,58 @@ async def organization_update(
     bic: OrganizationFields,
     corresp_acc: OrganizationFields,
     payee_inn: OrganizationFields,
+    logo_cache: LogoCacheDep,
     kpp: OrganizationFields = "",
     qr_color: OrganizationFields = DEFAULT_QR_COLOR,
     fee_percent: OrganizationFields = "",
     average_check: OrganizationFields = "",
     is_default: Annotated[str | None, Form()] = None,
-) -> RedirectResponse:
+    logo: Annotated[UploadFile | None, File()] = None,
+) -> Response:
     """Сохраняет организацию."""
     organization = await _get_organization(db, organization_id)
-    account_id = organization.account_id
+    account = await crud.get_account(db, organization.account_id)
+    submitted = _submitted_values(
+        alias=alias,
+        name=name,
+        personal_acc=personal_acc,
+        bank_name=bank_name,
+        bic=bic,
+        corresp_acc=corresp_acc,
+        payee_inn=payee_inn,
+        kpp=kpp,
+        qr_color=qr_color,
+        fee_percent=fee_percent,
+        average_check=average_check,
+        is_default=is_default,
+    )
+
     try:
-        data = _organization_input(
-            alias=alias,
-            name=name,
-            personal_acc=personal_acc,
-            bank_name=bank_name,
-            bic=bic,
-            corresp_acc=corresp_acc,
-            payee_inn=payee_inn,
-            kpp=kpp,
-            qr_color=qr_color,
-            fee_percent=fee_percent,
-            average_check=average_check,
-            is_default=is_default,
-            default_fee_bps=settings.default_acquiring_fee_bps,
-        )
+        data = _organization_input(submitted, settings.default_acquiring_fee_bps)
         await crud.update_organization(db, organization, data)
+        await _attach_logo(organization, logo, settings, logo_cache)
         await db.commit()
     except (NosbpError, ValueError) as error:
         await db.rollback()
-        message = error.message if isinstance(error, NosbpError) else str(error)
-        return _redirect(settings, f"/organizations/{organization_id}", err=message)
+        await _reload(db, account, organization)
+        return _page(
+            templates,
+            request,
+            "organization_form.html",
+            settings,
+            admin=admin,
+            err=_error_text(error),
+            account=account,
+            organization=organization,
+            form=submitted,
+        )
 
     log.info(
         "admin_organization_updated",
         admin=admin.email,
         organization=organization.alias,
     )
-    return _redirect(settings, f"/accounts/{account_id}", ok="Организация сохранена.")
+    return _redirect(settings, f"/accounts/{account.id}", ok="Организация сохранена.")
 
 
 @router.post("/organizations/{organization_id}/delete")

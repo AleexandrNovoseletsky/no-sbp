@@ -9,6 +9,9 @@
 """
 
 import datetime
+import uuid
+from collections import defaultdict
+from collections.abc import Sequence
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from typing import Final
@@ -110,6 +113,9 @@ class AccountStats:
 
 _EMPTY_COUNTS: Final[tuple[int, int, int, int]] = (0, 0, 0, 0)
 
+InvoiceTotals = dict[uuid.UUID, tuple[int, int, int, int]]
+ChargeTotals = dict[uuid.UUID, int]
+
 
 async def collect_account_stats(
     session: AsyncSession,
@@ -117,27 +123,49 @@ async def collect_account_stats(
     *,
     since: datetime.datetime | None = None,
 ) -> AccountStats:
-    """Собирает статистику по всем организациям заказчика.
+    """Собирает статистику по одному заказчику.
 
     :param since: считать только счета, созданные не раньше этого момента.
         None — за всё время.
     """
-    organizations = await _load_organizations(session, account.id)
-    if not organizations:
-        return AccountStats(account=account, organizations=())
+    collected = await collect_many_account_stats(session, [account], since=since)
+    return collected[0]
 
-    invoice_totals = await _invoice_totals(session, account.id, since)
-    charge_totals = await _charge_totals(session, account.id, since)
 
-    stats = tuple(
-        _build_stats(
-            organization,
-            invoice_totals.get(organization.id, _EMPTY_COUNTS),
-            charge_totals.get(organization.id, 0),
+async def collect_many_account_stats(
+    session: AsyncSession,
+    accounts: Sequence[Account],
+    *,
+    since: datetime.datetime | None = None,
+) -> list[AccountStats]:
+    """Собирает статистику сразу по нескольким заказчикам.
+
+    Три запроса на весь список, а не три на каждого. Список заказчиков —
+    главная страница панели, и считать её десятками запросов означало бы
+    ждать секунду на сотне строк вместо десятка миллисекунд.
+    """
+    if not accounts:
+        return []
+
+    account_ids = [account.id for account in accounts]
+    organizations = await _load_organizations(session, account_ids)
+    invoice_totals = await _invoice_totals(session, account_ids, since)
+    charge_totals = await _charge_totals(session, account_ids, since)
+
+    return [
+        AccountStats(
+            account=account,
+            organizations=tuple(
+                _build_stats(
+                    organization,
+                    invoice_totals.get(organization.id, _EMPTY_COUNTS),
+                    charge_totals.get(organization.id, 0),
+                )
+                for organization in organizations.get(account.id, ())
+            ),
         )
-        for organization in organizations
-    )
-    return AccountStats(account=account, organizations=stats)
+        for account in accounts
+    ]
 
 
 def _build_stats(
@@ -162,20 +190,25 @@ def _build_stats(
 
 
 async def _load_organizations(
-    session: AsyncSession, account_id: object
-) -> list[Organization]:
-    """Загружает организации заказчика в постоянном порядке."""
+    session: AsyncSession, account_ids: Sequence[uuid.UUID]
+) -> dict[uuid.UUID, list[Organization]]:
+    """Загружает организации всех заказчиков разом, в постоянном порядке."""
     result = await session.execute(
         select(Organization)
-        .where(Organization.account_id == account_id)
+        .where(Organization.account_id.in_(account_ids))
         .order_by(Organization.is_default.desc(), Organization.alias)
     )
-    return list(result.scalars())
+    grouped: dict[uuid.UUID, list[Organization]] = defaultdict(list)
+    for organization in result.scalars():
+        grouped[organization.account_id].append(organization)
+    return grouped
 
 
 async def _invoice_totals(
-    session: AsyncSession, account_id: object, since: datetime.datetime | None
-) -> dict[object, tuple[int, int, int, int]]:
+    session: AsyncSession,
+    account_ids: Sequence[uuid.UUID],
+    since: datetime.datetime | None,
+) -> InvoiceTotals:
     """Считает по каждой организации: счета, тарификации, оборот, счета без суммы."""
     query = (
         select(
@@ -185,7 +218,7 @@ async def _invoice_totals(
             func.coalesce(func.sum(Invoice.sum_kopecks), 0),
             func.count(Invoice.id).filter(Invoice.sum_kopecks.is_(None)),
         )
-        .where(Invoice.account_id == account_id)
+        .where(Invoice.account_id.in_(account_ids))
         .group_by(Invoice.organization_id)
     )
     if since is not None:
@@ -199,8 +232,10 @@ async def _invoice_totals(
 
 
 async def _charge_totals(
-    session: AsyncSession, account_id: object, since: datetime.datetime | None
-) -> dict[object, int]:
+    session: AsyncSession,
+    account_ids: Sequence[uuid.UUID],
+    since: datetime.datetime | None,
+) -> ChargeTotals:
     """Считает, сколько списано за счета каждой организации.
 
     Журнал соединяется со счетами: сама запись списания не знает, к какой
@@ -213,7 +248,7 @@ async def _charge_totals(
         )
         .join(Invoice, Invoice.id == LedgerEntry.invoice_id)
         .where(
-            LedgerEntry.account_id == account_id,
+            LedgerEntry.account_id.in_(account_ids),
             LedgerEntry.entry_type == LedgerEntryType.CHARGE,
         )
         .group_by(Invoice.organization_id)

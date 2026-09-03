@@ -14,6 +14,7 @@ from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from nosbp.core.constants import (
+    DEFAULT_ACQUIRING_FEE_BPS,
     DEFAULT_QR_BORDER,
     DEFAULT_QR_SCALE,
     MAX_ACQUIRING_FEE_BPS,
@@ -128,7 +129,7 @@ class Settings(BaseSettings):
 
     # ------------------------------------------------------ комиссия эквайринга
     default_acquiring_fee_bps: int = Field(
-        default=70,
+        default=DEFAULT_ACQUIRING_FEE_BPS,
         ge=0,
         le=MAX_ACQUIRING_FEE_BPS,
         description=(
@@ -193,6 +194,14 @@ class Settings(BaseSettings):
     qr_scale: int = Field(default=DEFAULT_QR_SCALE, ge=1, le=40)
     qr_border: int = Field(default=DEFAULT_QR_BORDER, ge=0, le=16)
 
+    logo_max_bytes: int = Field(
+        default=512 * 1024,
+        gt=0,
+        description=(
+            "Предельный размер файла логотипа. В QR-коде он занимает меньше "
+            "сотни пикселей, поэтому мегабайты здесь ни к чему."
+        ),
+    )
     logo_cache_ttl_seconds: int = Field(
         default=600,
         ge=0,

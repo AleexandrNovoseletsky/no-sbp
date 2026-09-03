@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex, nofollow">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect width='16' height='16' rx='3' fill='%230e6b62'/><text x='8' y='12' font-size='10' font-family='sans-serif' fill='white' text-anchor='middle'>N</text></svg>">
 <title>{% block title %}Панель NoSBP{% endblock %}</title>
 <style>
 :root{
@@ -86,6 +87,14 @@ button.danger{background:var(--warn); border-color:var(--warn); color:#fff}
 .token-box{background:var(--accent-soft); border:1px solid var(--accent); border-radius:5px; padding:14px 16px; margin-bottom:16px}
 .token-box .mono{display:block; margin-top:8px; word-break:break-all; font-size:14px; color:var(--ink)}
 form.inline{display:inline}
+input[type=file]{width:100%; padding:7px 10px; font:inherit; color:var(--ink-soft);
+  background:var(--surface-2); border:1px solid var(--line); border-radius:4px}
+.colorline{display:flex; align-items:center; gap:12px}
+.colorline input[type=color]{width:64px; flex:none}
+.warn-text{color:var(--warn); font-size:12.5px}
+.swatch{display:inline-block; width:14px; height:14px; border-radius:3px;
+  border:1px solid var(--line); vertical-align:-2px}
+.muted output,output.muted{font-size:12.5px}
 </style>
 </head>
 <body>
@@ -96,7 +105,7 @@ form.inline{display:inline}
   <span class="spacer"></span>
   <span class="who">{{ admin.email }}</span>
   <form method="post" action="{{ admin_prefix }}/logout" class="inline">
-    <input type="hidden" name="{{ csrf_field }}" value="{{ csrf | default('') }}">
+    <input type="hidden" name="{{ csrf_field }}" value="{{ csrf }}">
     <button class="ghost" type="submit">Выйти</button>
   </form>
 </header>

@@ -477,3 +477,319 @@ async def test_form_with_wrong_csrf_is_refused(logged_in, session, make_account)
 
     await session.refresh(account)
     assert account.balance_kopecks == 0
+
+
+# ---------------------------------------------------------------------------
+# Сохранение введённого при ошибке
+# ---------------------------------------------------------------------------
+
+
+async def test_organization_form_keeps_input_after_error(logged_in, make_account):
+    """Ошибка в одном поле не должна стирать восемь заполненных.
+
+    Ровно тот случай, на котором споткнулись: реквизиты введены, цвет
+    выбран слишком светлый — и форма возвращается пустой.
+    """
+    panel, _, csrf = logged_in
+    account = await make_account()
+
+    response = await panel.post(
+        f"{ADMIN}/accounts/{account.id}/organizations/new",
+        data=org_form(
+            csrf,
+            alias="romashka",
+            name="ООО Ромашка",
+            qr_color="#ffa500",
+            fee_percent="1,25",
+            average_check="47000",
+            is_default="1",
+        ),
+    )
+
+    assert response.status_code == 200
+    assert "слишком светлый" in response.text
+
+    page = response.text
+    assert 'value="romashka"' in page
+    assert 'value="ООО Ромашка"' in page
+    assert f'value="{PERSONAL_ACC}"' in page
+    assert f'value="{CORRESP_ACC}"' in page
+    assert f'value="{INN_COMPANY}"' in page
+    assert f'value="{BIC}"' in page
+    assert 'value="773601001"' in page
+    assert 'value="#ffa500"' in page
+    assert 'value="1,25"' in page
+    assert 'value="47000"' in page
+    assert "checked" in page
+
+
+async def test_organization_form_keeps_input_after_checksum_error(
+    logged_in, make_account
+):
+    panel, _, csrf = logged_in
+    account = await make_account()
+    broken = PERSONAL_ACC[:-1] + "8"
+
+    response = await panel.post(
+        f"{ADMIN}/accounts/{account.id}/organizations/new",
+        data=org_form(csrf, personal_acc=broken, name="ООО Ошибка"),
+    )
+    assert response.status_code == 200
+    assert "контрольного разряда" in response.text
+    assert f'value="{broken}"' in response.text
+    assert 'value="ООО Ошибка"' in response.text
+
+
+async def test_organization_edit_keeps_input_after_error(
+    logged_in, make_account, make_organization
+):
+    panel, _, csrf = logged_in
+    account = await make_account()
+    organization = await make_organization(account, alias="first")
+
+    response = await panel.post(
+        f"{ADMIN}/organizations/{organization.id}/edit",
+        data=org_form(csrf, alias="renamed", qr_color="#eeeeee"),
+    )
+    assert response.status_code == 200
+    assert 'value="renamed"' in response.text
+    assert 'value="#eeeeee"' in response.text
+
+
+async def test_account_form_keeps_input_after_error(logged_in, make_account):
+    panel, _, csrf = logged_in
+    existing = await make_account(email="taken@example.com")
+
+    response = await panel.post(
+        f"{ADMIN}/accounts/new",
+        data={
+            "csrf_token": csrf,
+            "email": existing.email,
+            "display_name": "ООО Второй",
+            "daily_limit": "250",
+            "is_unlimited": "1",
+        },
+    )
+    assert response.status_code == 200
+    assert "уже заведён" in response.text
+    assert 'value="taken@example.com"' in response.text
+    assert 'value="ООО Второй"' in response.text
+    assert 'value="250"' in response.text
+    assert "checked" in response.text
+
+
+async def test_balance_form_keeps_input_after_error(logged_in, make_account):
+    panel, _, csrf = logged_in
+    account = await make_account(balance_rubles=0)
+
+    response = await panel.post(
+        f"{ADMIN}/accounts/{account.id}/balance",
+        data={
+            "csrf_token": csrf,
+            "operation": "topup",
+            "amount": "10",
+            "comment": "по счёту 42",
+        },
+    )
+    assert response.status_code == 200
+    assert "Минимальная сумма пополнения" in response.text
+    assert 'value="10"' in response.text
+    assert 'value="по счёту 42"' in response.text
+
+
+async def test_account_edit_keeps_input_after_error(logged_in, make_account):
+    panel, _, csrf = logged_in
+    account = await make_account()
+
+    response = await panel.post(
+        f"{ADMIN}/accounts/{account.id}/edit",
+        data={
+            "csrf_token": csrf,
+            "display_name": "ООО Новое",
+            "daily_limit": "не число",
+            "is_active": "1",
+        },
+    )
+    assert response.status_code == 200
+    assert "не похоже на сумму" in response.text
+    assert 'value="ООО Новое"' in response.text
+    assert 'value="не число"' in response.text
+
+
+# ---------------------------------------------------------------------------
+# Логотип
+# ---------------------------------------------------------------------------
+
+
+def png_bytes(size: int = 120) -> bytes:
+    """Маленький настоящий PNG."""
+    from io import BytesIO
+
+    from PIL import Image
+
+    buffer = BytesIO()
+    Image.new("RGBA", (size, size), (14, 107, 98, 255)).save(buffer, format="PNG")
+    return buffer.getvalue()
+
+
+async def test_logo_upload_is_stored(logged_in, session, storage, make_account):
+    panel, _, csrf = logged_in
+    account = await make_account()
+
+    response = await panel.post(
+        f"{ADMIN}/accounts/{account.id}/organizations/new",
+        data=org_form(csrf),
+        files={"logo": ("logo.png", png_bytes(), "image/png")},
+    )
+    assert response.status_code == 303
+
+    organization = (
+        await session.execute(
+            select(Organization).where(Organization.account_id == account.id)
+        )
+    ).scalar_one()
+    assert organization.logo_key is not None
+    assert await storage.get(organization.logo_key) == png_bytes()
+
+
+async def test_empty_file_field_does_not_wipe_existing_logo(
+    logged_in, session, make_account, make_organization
+):
+    """Браузер присылает поле файла всегда — даже когда ничего не выбрано."""
+    panel, _, csrf = logged_in
+    account = await make_account()
+    organization = await make_organization(account, logo_key="logos/keep.png")
+
+    response = await panel.post(
+        f"{ADMIN}/organizations/{organization.id}/edit",
+        data=org_form(csrf, name="Переименовано"),
+        files={"logo": ("", b"", "application/octet-stream")},
+    )
+    assert response.status_code == 303
+
+    await session.refresh(organization)
+    assert organization.logo_key == "logos/keep.png"
+
+
+async def test_not_an_image_is_refused(logged_in, session, make_account):
+    panel, _, csrf = logged_in
+    account = await make_account()
+
+    response = await panel.post(
+        f"{ADMIN}/accounts/{account.id}/organizations/new",
+        data=org_form(csrf),
+        files={"logo": ("logo.png", b"\x00\x01 not an image", "image/png")},
+    )
+    assert response.status_code == 200
+    assert "не удалось прочитать как изображение" in response.text
+
+    left = await session.execute(
+        select(Organization).where(Organization.account_id == account.id)
+    )
+    assert left.scalars().first() is None
+
+
+async def test_wrong_extension_is_refused(logged_in, make_account):
+    panel, _, csrf = logged_in
+    account = await make_account()
+
+    response = await panel.post(
+        f"{ADMIN}/accounts/{account.id}/organizations/new",
+        data=org_form(csrf),
+        files={"logo": ("logo.gif", png_bytes(), "image/gif")},
+    )
+    assert response.status_code == 200
+    assert "в одном из форматов" in response.text
+
+
+async def test_oversized_logo_is_refused(logged_in, make_account, settings):
+    panel, _, csrf = logged_in
+    account = await make_account()
+    huge = b"\x89PNG\r\n\x1a\n" + b"\x00" * settings.logo_max_bytes
+
+    response = await panel.post(
+        f"{ADMIN}/accounts/{account.id}/organizations/new",
+        data=org_form(csrf),
+        files={"logo": ("logo.png", huge, "image/png")},
+    )
+    assert response.status_code == 200
+    assert "КБ" in response.text
+
+
+async def test_replacing_logo_drops_it_from_cache(
+    logged_in, session, storage, make_account, make_organization, panel
+):
+    """Иначе организация несколько минут показывала бы старую картинку."""
+    from nosbp.storage.logo_cache import LogoCache
+
+    panel_client, _, csrf = logged_in
+    account = await make_account()
+    organization = await make_organization(account, logo_key="logos/old.png")
+    await storage.put("logos/old.png", png_bytes(), content_type="image/png")
+
+    cache: LogoCache = panel_client._transport.app.state.logo_cache  # type: ignore[attr-defined]
+    await cache.get("logos/old.png")
+    assert len(cache) == 1
+
+    response = await panel_client.post(
+        f"{ADMIN}/organizations/{organization.id}/edit",
+        data=org_form(csrf),
+        files={"logo": ("new.png", png_bytes(200), "image/png")},
+    )
+    assert response.status_code == 303
+    assert len(cache) == 0
+
+
+# ---------------------------------------------------------------------------
+# Поиск
+# ---------------------------------------------------------------------------
+
+
+async def test_search_wildcards_are_not_special(logged_in, make_account):
+    """Знак процента в строке поиска — это символ, а не «что угодно»."""
+    panel, _, _ = logged_in
+    await make_account(email="plain@example.com")
+
+    response = await panel.get(f"{ADMIN}/", params={"q": "%"})
+    assert "plain@example.com" not in response.text
+
+
+async def test_underscore_is_not_special(logged_in, make_account):
+    panel, _, _ = logged_in
+    await make_account(email="abc@example.com")
+
+    response = await panel.get(f"{ADMIN}/", params={"q": "a_c"})
+    assert "abc@example.com" not in response.text
+
+
+async def test_search_finds_by_substring(logged_in, make_account):
+    panel, _, _ = logged_in
+    await make_account(email="findme@example.com")
+
+    response = await panel.get(f"{ADMIN}/", params={"q": "INDM"})
+    assert "findme@example.com" in response.text
+
+
+# ---------------------------------------------------------------------------
+# Проверка ввода
+# ---------------------------------------------------------------------------
+
+
+async def test_negative_daily_limit_is_refused(logged_in, session, make_account):
+    panel, _, csrf = logged_in
+    account = await make_account()
+
+    response = await panel.post(
+        f"{ADMIN}/accounts/{account.id}/edit",
+        data={
+            "csrf_token": csrf,
+            "display_name": account.display_name,
+            "is_active": "1",
+            "daily_limit": "-100",
+        },
+    )
+    assert response.status_code == 200
+    assert "не может быть отрицательным" in response.text
+
+    await session.refresh(account)
+    assert account.daily_charge_limit_kopecks != -10_000

@@ -1,10 +1,11 @@
 """Вход в панель управления и работа с сессиями."""
 
 import datetime
+import uuid
 from dataclasses import dataclass
 from typing import Final
 
-from sqlalchemy import select
+from sqlalchemy import delete, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from nosbp.admin.security import (
@@ -17,6 +18,10 @@ from nosbp.admin.security import (
     verify_totp,
 )
 from nosbp.core.config import Settings
+from nosbp.core.constants import (
+    IP_ADDRESS_MAX_LENGTH,
+    USER_AGENT_MAX_LENGTH,
+)
 from nosbp.core.errors import AdminAuthError, AdminLockedError
 from nosbp.db.base import utcnow
 from nosbp.db.models import AdminSession, AdminUser
@@ -140,12 +145,32 @@ class AdminAuthService:
             expires_at=now
             + datetime.timedelta(hours=self._settings.admin_session_ttl_hours),
             last_seen_at=now,
-            ip_address=ip_address[:45],
-            user_agent=user_agent[:1000],
+            ip_address=ip_address[:IP_ADDRESS_MAX_LENGTH],
+            user_agent=user_agent[:USER_AGENT_MAX_LENGTH],
         )
         self._session.add(session)
+        await self._purge_stale_sessions(admin.id, now)
         await self._session.commit()
         return IssuedSession(token=token, session=session)
+
+    async def _purge_stale_sessions(
+        self, admin_id: uuid.UUID, now: datetime.datetime
+    ) -> None:
+        """Удаляет истёкшие и отозванные сессии администратора.
+
+        Делается при входе, а не по расписанию: сессий у одного человека
+        единицы, отдельный планировщик ради этого заводить незачем.
+        Без уборки таблица растёт вечно.
+        """
+        await self._session.execute(
+            delete(AdminSession).where(
+                AdminSession.admin_id == admin_id,
+                or_(
+                    AdminSession.expires_at < now,
+                    AdminSession.revoked_at.is_not(None),
+                ),
+            )
+        )
 
     async def load_session(self, token: str | None) -> AdminSession | None:
         """Находит живую сессию по токену из куки.
@@ -186,7 +211,7 @@ class AdminAuthService:
         session.revoked_at = utcnow()
         await self._session.commit()
 
-    async def close_all_sessions(self, admin_id: object) -> int:
+    async def close_all_sessions(self, admin_id: uuid.UUID) -> int:
         """Отзывает все сессии администратора. Нужно при смене пароля."""
         result = await self._session.execute(
             select(AdminSession).where(

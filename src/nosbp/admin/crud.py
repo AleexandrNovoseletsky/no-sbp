@@ -7,11 +7,17 @@
 
 import uuid
 from dataclasses import dataclass
+from typing import Final
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from nosbp.core.config import Settings
+from nosbp.core.constants import (
+    DEFAULT_ACQUIRING_FEE_BPS,
+    DEFAULT_QR_COLOR,
+    MAX_ACQUIRING_FEE_BPS,
+)
 from nosbp.core.errors import ValidationError
 from nosbp.db.models import Account, ApiToken, Organization
 from nosbp.payments.qr import validate_qr_color
@@ -36,8 +42,8 @@ class RequisitesInput:
     corresp_acc: str
     payee_inn: str
     kpp: str | None = None
-    qr_color: str = "#000000"
-    acquiring_fee_bps: int = 70
+    qr_color: str = DEFAULT_QR_COLOR
+    acquiring_fee_bps: int = DEFAULT_ACQUIRING_FEE_BPS
     average_check_kopecks: int | None = None
     is_default: bool = False
 
@@ -47,14 +53,43 @@ class RequisitesInput:
 # ---------------------------------------------------------------------------
 
 
-async def list_accounts(session: AsyncSession, *, search: str = "") -> list[Account]:
+LIKE_ESCAPE_CHARACTER: Final[str] = "\\"
+LIKE_SPECIAL_CHARACTERS: Final[tuple[str, ...]] = ("%", "_")
+
+ACCOUNTS_PAGE_SIZE: Final = 200
+"""Сколько заказчиков показывать в списке.
+
+Предел нужен не ради скорости запроса, а ради страницы: несколько тысяч
+строк браузер рисует ощутимо долго. Когда столько накопится, здесь
+появится нормальная постраничная навигация.
+"""
+
+
+def _like_pattern(search: str) -> str:
+    """Готовит шаблон для LIKE, обезвреживая подстановочные знаки.
+
+    Без этого «%» в строке поиска превращался бы в «что угодно», а «_» —
+    в «любой символ»: поиск вёл бы себя необъяснимо.
+    """
+    escaped = search.strip().lower()
+    escaped = escaped.replace(LIKE_ESCAPE_CHARACTER, LIKE_ESCAPE_CHARACTER * 2)
+    for character in LIKE_SPECIAL_CHARACTERS:
+        escaped = escaped.replace(character, LIKE_ESCAPE_CHARACTER + character)
+    return f"%{escaped}%"
+
+
+async def list_accounts(
+    session: AsyncSession, *, search: str = "", limit: int = ACCOUNTS_PAGE_SIZE
+) -> list[Account]:
     """Возвращает заказчиков, при необходимости отфильтровав по подстроке."""
-    query = select(Account).order_by(Account.created_at.desc())
-    if search:
-        pattern = f"%{search.strip().lower()}%"
+    query = select(Account).order_by(Account.created_at.desc()).limit(limit)
+    if search.strip():
+        pattern = _like_pattern(search)
         query = query.where(
-            func.lower(Account.email).like(pattern)
-            | func.lower(Account.display_name).like(pattern)
+            func.lower(Account.email).like(pattern, escape=LIKE_ESCAPE_CHARACTER)
+            | func.lower(Account.display_name).like(
+                pattern, escape=LIKE_ESCAPE_CHARACTER
+            )
         )
     result = await session.execute(query)
     return list(result.scalars())
@@ -92,7 +127,7 @@ async def create_account(
     if existing.scalar_one_or_none() is not None:
         raise ValidationError(f"Заказчик с адресом {normalized} уже заведён.")
 
-    limit = daily_limit_kopecks
+    limit = _validated_daily_limit(daily_limit_kopecks)
     if limit is None and use_default_limit:
         limit = settings.default_daily_charge_limit_kopecks
 
@@ -126,8 +161,19 @@ async def update_account(
     account.display_name = display_name.strip()
     account.is_active = is_active
     account.is_unlimited = is_unlimited
-    account.daily_charge_limit_kopecks = daily_limit_kopecks
+    account.daily_charge_limit_kopecks = _validated_daily_limit(daily_limit_kopecks)
     return account
+
+
+def _validated_daily_limit(kopecks: int | None) -> int | None:
+    """Проверяет суточный лимит.
+
+    :raises ValidationError: если лимит отрицательный — это не «без
+        ограничения», а бессмыслица, и молча принимать её нельзя.
+    """
+    if kopecks is not None and kopecks < 0:
+        raise ValidationError("Суточный лимит не может быть отрицательным.")
+    return kopecks
 
 
 async def delete_account(session: AsyncSession, account: Account) -> None:
@@ -231,7 +277,7 @@ def _validated_fields(data: RequisitesInput) -> dict[str, object]:
         raise ValidationError("Укажите наименование получателя платежа.")
     if not data.bank_name.strip():
         raise ValidationError("Укажите наименование банка.")
-    if not 0 <= data.acquiring_fee_bps <= 10_000:
+    if not 0 <= data.acquiring_fee_bps <= MAX_ACQUIRING_FEE_BPS:
         raise ValidationError("Ставка эквайринга должна быть от 0 до 100 %.")
     if data.average_check_kopecks is not None and data.average_check_kopecks < 0:
         raise ValidationError("Средний чек не может быть отрицательным.")

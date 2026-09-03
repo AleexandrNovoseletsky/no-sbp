@@ -1,5 +1,6 @@
 """Зависимости панели управления: текущая сессия и защита от CSRF."""
 
+from pathlib import Path
 from typing import Annotated
 
 from fastapi import Depends, Form, Request
@@ -12,22 +13,32 @@ from nosbp.admin.security import (
     csrf_tokens_match,
 )
 from nosbp.admin.service import AdminAuthService
+from nosbp.admin.stats import format_fee_percent
 from nosbp.core.config import Settings, get_settings
 from nosbp.core.errors import AdminAuthError
+from nosbp.core.money import format_roubles, roubles_input
 from nosbp.db.models import AdminSession, AdminUser
 from nosbp.db.session import get_db
-from nosbp.payments.dependencies import AppSettings, DbSession
+from nosbp.payments.dependencies import AppSettings, DbSession, LogoCacheDep
 
 TEMPLATES_DIRECTORY = "templates"
 
 
 def build_templates(settings: Settings) -> Jinja2Templates:
-    """Собирает движок шаблонов с общими для всех страниц значениями."""
-    from pathlib import Path
+    """Собирает движок шаблонов с общими для всех страниц значениями.
 
+    Форматирование денег и процентов подключается сюда один раз, а не
+    передаётся в контексте каждой страницы: иначе о нём приходится помнить
+    при добавлении любого нового шаблона.
+    """
     templates = Jinja2Templates(directory=Path(__file__).parent / TEMPLATES_DIRECTORY)
-    templates.env.globals["admin_prefix"] = settings.admin_path_prefix.rstrip("/")
-    templates.env.globals["csrf_field"] = CSRF_FIELD_NAME
+    templates.env.globals.update(
+        admin_prefix=settings.admin_path_prefix.rstrip("/"),
+        csrf_field=CSRF_FIELD_NAME,
+        format_roubles=format_roubles,
+        format_fee_percent=format_fee_percent,
+        roubles_input=roubles_input,
+    )
     return templates
 
 
@@ -95,6 +106,17 @@ async def verify_csrf(
 
 
 CsrfProtected = Annotated[AdminContext, Depends(verify_csrf)]
+
+__all__ = [
+    "AdminContext",
+    "AdminDb",
+    "AdminSettings",
+    "CsrfProtected",
+    "CurrentAdmin",
+    "LogoCacheDep",
+    "Templates",
+    "build_templates",
+]
 
 AdminDb = Annotated[AsyncSession, Depends(get_db)]
 AdminSettings = Annotated[Settings, Depends(get_settings)]

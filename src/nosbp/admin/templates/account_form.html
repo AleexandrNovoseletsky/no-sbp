@@ -10,21 +10,21 @@
   <div class="grid two">
     <div class="field">
       <label for="email">Почта</label>
-      <input id="email" type="email" name="email" value="{{ email | default('') }}" required autofocus>
+      <input id="email" type="email" name="email" value="{{ form.email }}" required autofocus>
     </div>
     <div class="field">
       <label for="display_name">Название компании</label>
       <input id="display_name" type="text" name="display_name"
-             value="{{ display_name | default('') }}" required>
+             value="{{ form.display_name }}" required>
     </div>
   </div>
   <div class="field" style="margin-top:14px; max-width:260px">
     <label for="daily_limit">Суточный лимит списаний, ₽</label>
     <input id="daily_limit" type="text" name="daily_limit" inputmode="decimal"
-           placeholder="из настроек сервиса">
+           placeholder="из настроек сервиса" value="{{ form.daily_limit }}">
   </div>
   <label class="check">
-    <input type="checkbox" name="is_unlimited" value="1">
+    <input type="checkbox" name="is_unlimited" value="1" {{ 'checked' if form.is_unlimited }}>
     Безлимит — счета генерируются бесплатно
   </label>
   <div class="actions">

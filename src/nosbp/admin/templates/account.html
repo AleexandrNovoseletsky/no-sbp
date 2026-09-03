@@ -35,21 +35,20 @@
   <div class="grid two">
     <div class="field">
       <label for="display_name">Название компании</label>
-      <input id="display_name" type="text" name="display_name" value="{{ account.display_name }}" required>
+      <input id="display_name" type="text" name="display_name" value="{{ edit.display_name }}" required>
     </div>
     <div class="field">
       <label for="daily_limit">Суточный лимит списаний, ₽</label>
       <input id="daily_limit" type="text" name="daily_limit" inputmode="decimal"
-             placeholder="без ограничения"
-             value="{{ '%.2f'|format(account.daily_charge_limit_kopecks / 100) if account.daily_charge_limit_kopecks is not none else '' }}">
+             placeholder="без ограничения" value="{{ edit.daily_limit }}">
     </div>
   </div>
   <label class="check">
-    <input type="checkbox" name="is_active" value="1" {{ 'checked' if account.is_active }}>
+    <input type="checkbox" name="is_active" value="1" {{ 'checked' if edit.is_active }}>
     Аккаунт работает
   </label>
   <label class="check">
-    <input type="checkbox" name="is_unlimited" value="1" {{ 'checked' if account.is_unlimited }}>
+    <input type="checkbox" name="is_unlimited" value="1" {{ 'checked' if edit.is_unlimited }}>
     Безлимит — счета генерируются бесплатно, баланс и лимиты не проверяются
   </label>
   <div class="actions">
@@ -64,7 +63,7 @@
 <table>
   <thead>
     <tr>
-      <th>Организация</th><th>Реквизиты</th><th class="num">Ставка</th>
+      <th>Организация</th><th>Реквизиты</th><th>Оформление</th><th class="num">Ставка</th>
       <th class="num">Операций</th><th class="num">Сэкономлено</th><th></th>
     </tr>
   </thead>
@@ -78,6 +77,11 @@
       </td>
       <td class="mono muted">
         {{ org.personal_acc }}<br>{{ org.bank_name }} · БИК {{ org.bic }}
+      </td>
+      <td>
+        <span class="swatch" style="background:{{ org.qr_color }}"
+              title="{{ org.qr_color }}"></span>
+        {% if org.logo_key %}<span class="pill free">логотип</span>{% endif %}
       </td>
       <td class="num">
         {{ format_fee_percent(org.acquiring_fee_bps) }}
@@ -96,7 +100,7 @@
       </td>
     </tr>
   {% else %}
-    <tr><td colspan="6" class="muted">Организаций пока нет — QR генерировать не из чего.</td></tr>
+    <tr><td colspan="7" class="muted">Организаций пока нет — QR генерировать не из чего.</td></tr>
   {% endfor %}
   </tbody>
 </table>
@@ -138,19 +142,20 @@
       <div class="field">
         <label for="operation">Операция</label>
         <select id="operation" name="operation">
-          <option value="topup">Пополнение</option>
-          <option value="refund">Возврат</option>
-          <option value="adjust">Корректировка</option>
+          <option value="topup" {{ 'selected' if balance.operation == 'topup' }}>Пополнение</option>
+          <option value="refund" {{ 'selected' if balance.operation == 'refund' }}>Возврат</option>
+          <option value="adjust" {{ 'selected' if balance.operation == 'adjust' }}>Корректировка</option>
         </select>
       </div>
       <div class="field">
         <label for="amount">Сумма, ₽</label>
         <input id="amount" type="text" name="amount" inputmode="decimal" required
-               placeholder="1000 или -50 для корректировки">
+               placeholder="1000 или -50 для корректировки" value="{{ balance.amount }}">
       </div>
       <div class="field">
         <label for="comment">Комментарий в выписку</label>
-        <input id="comment" type="text" name="comment" placeholder="за что">
+        <input id="comment" type="text" name="comment" placeholder="за что"
+               value="{{ balance.comment }}">
       </div>
     </div>
     <div class="actions"><button type="submit">Провести</button></div>

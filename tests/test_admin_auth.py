@@ -357,3 +357,32 @@ async def test_logout_closes_session(logged_in):
     after = await panel.get(f"{ADMIN_PREFIX}/")
     assert after.status_code == 303
     assert "/login" in after.headers["location"]
+
+
+async def test_login_purges_stale_sessions(session, make_admin):
+    """Иначе таблица сессий растёт вечно."""
+    admin, _, _ = await make_admin()
+    service = AdminAuthService(session, get_settings())
+
+    expired = await service.open_session(admin, ip_address="", user_agent="")
+    expired.session.expires_at = datetime.datetime.now(
+        datetime.UTC
+    ) - datetime.timedelta(days=1)
+    await session.commit()
+
+    revoked = await service.open_session(admin, ip_address="", user_agent="")
+    await service.close_session(revoked.token)
+
+    live = await service.open_session(admin, ip_address="", user_agent="")
+
+    from sqlalchemy import func, select
+
+    from nosbp.db.models import AdminSession
+
+    total = await session.execute(
+        select(func.count())
+        .select_from(AdminSession)
+        .where(AdminSession.admin_id == admin.id)
+    )
+    assert total.scalar_one() == 1
+    assert await service.load_session(live.token) is not None

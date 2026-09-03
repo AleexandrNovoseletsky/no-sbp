@@ -27,7 +27,10 @@ class LogoCache:
         ttl_seconds: int,
         max_entries: int,
     ) -> None:
-        self._storage = storage
+        self.storage = storage
+        """Хранилище под кэшем — нужно тем, кто логотипы не читает,
+        а записывает."""
+
         self._ttl_seconds = ttl_seconds
         self._max_entries = max_entries
         self._entries: OrderedDict[str, tuple[float, bytes | None]] = OrderedDict()
@@ -53,7 +56,7 @@ class LogoCache:
                 return data
             del self._entries[key]
 
-        data = await self._storage.get(key)
+        data = await self.storage.get(key)
         self._put(key, data, now)
         return data
 
