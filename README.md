@@ -16,8 +16,10 @@
 - [Персональные данные](#персональные-данные)
 - [Развёртывание](#развёртывание)
 - [Эксплуатация](#эксплуатация)
+- [Модель доступа](#модель-доступа)
 - [Разработка](#разработка)
 - [Устройство проекта](#устройство-проекта)
+- [Лицензия](#лицензия)
 
 ## Как это работает
 
@@ -80,7 +82,10 @@ GET-запросах ошибка по умолчанию возвращаетс
 не более `OVERDRAFT_MAX_EXTENSIONS` раз.
 
 **Безлимит.** Заказчику можно отключить тарификацию целиком: счета
-создаются и учитываются в статистике, но не списывают средства.
+создаются и учитываются в статистике, но не списывают средства. Для таких
+аккаунтов выписка пуста, а учёт ведётся по числу счетов, обращений к API
+и рассчитанной экономии — эти показатели видны в карточке заказчика
+вместе с историей счетов.
 
 Все параметры тарификации задаются переменными окружения; полный список
 с описаниями — в [`.env.example`](.env.example) и в
@@ -108,7 +113,39 @@ A-запись которого уже указывает на его адрес
 
 ```bash
 sudo apt update && sudo apt upgrade -y
-sudo apt install -y ca-certificates curl git nginx
+sudo apt install -y ca-certificates curl git gnupg
+```
+
+Конфигурация использует директиву `http2 on`, доступную с nginx 1.25.1.
+В репозитории Ubuntu 24.04 находится версия 1.24, поэтому nginx ставится
+из официального репозитория разработчиков:
+
+```bash
+curl -fsSL https://nginx.org/keys/nginx_signing.key \
+  | sudo gpg --dearmor -o /usr/share/keyrings/nginx-archive-keyring.gpg
+echo "deb [signed-by=/usr/share/keyrings/nginx-archive-keyring.gpg] \
+http://nginx.org/packages/mainline/ubuntu $(. /etc/os-release && echo $VERSION_CODENAME) nginx" \
+  | sudo tee /etc/apt/sources.list.d/nginx.list > /dev/null
+
+# Пакет из этого репозитория имеет приоритет над версией из Ubuntu
+printf 'Package: *\nPin: origin nginx.org\nPin-Priority: 900\n' \
+  | sudo tee /etc/apt/preferences.d/99nginx > /dev/null
+
+sudo apt update
+sudo apt install -y nginx
+nginx -v
+```
+
+Если nginx уже установлен из репозитория Ubuntu, те же команды обновят
+его на свежую версию. Собственные конфигурации в `/etc/nginx/sites-*`
+при обновлении сохраняются, но пакет от nginx.org не подключает эти
+каталоги автоматически — в конце раздела про nginx это учтено.
+
+Обновление в дальнейшем:
+
+```bash
+sudo apt update && sudo apt install --only-upgrade nginx
+sudo nginx -t && sudo systemctl reload nginx
 ```
 
 Установка Docker:
@@ -218,15 +255,22 @@ sudo nano /etc/nginx/sites-available/nosbp.conf
 ssh -L 8443:127.0.0.1:443 nosbp@example.com
 ```
 
-Если на сервере nginx 1.25.1 или новее, директивы `listen ... http2`
-помечены устаревшими — их заменяет отдельная строка `http2 on;`. На
-Ubuntu 24.04 (nginx 1.24) оставить как есть.
-
 Включение конфигурации:
 
 ```bash
+sudo mkdir -p /etc/nginx/sites-available /etc/nginx/sites-enabled
 sudo ln -s /etc/nginx/sites-available/nosbp.conf /etc/nginx/sites-enabled/
-sudo rm -f /etc/nginx/sites-enabled/default
+sudo rm -f /etc/nginx/sites-enabled/default /etc/nginx/conf.d/default.conf
+```
+
+Пакет с nginx.org не подключает каталог `sites-enabled`. Если строки
+`include /etc/nginx/sites-enabled/*;` в `/etc/nginx/nginx.conf` нет, она
+добавляется в блок `http`:
+
+```bash
+grep -q "sites-enabled" /etc/nginx/nginx.conf || sudo sed -i \
+  "s|include /etc/nginx/conf.d/\*.conf;|include /etc/nginx/conf.d/*.conf;\n    include /etc/nginx/sites-enabled/*;|" \
+  /etc/nginx/nginx.conf
 sudo nginx -t && sudo systemctl reload nginx
 ```
 
@@ -260,7 +304,44 @@ Aegis, 1Password — любого. Секрет показывается оди�
 
 После этого панель доступна по адресу `https://example.com/ВАШ_ПУТЬ/login`.
 
-### 9. Резервное копирование
+### 9. Оповещения о входе в панель
+
+Сервис отправляет сообщение при каждом входе в панель и при неудачных
+попытках. Это позволяет заметить вход, которого вы не совершали.
+Поддерживаются Telegram и MAX; можно включить оба сразу.
+
+**Telegram.** Токен выдаёт [@BotFather](https://t.me/BotFather) командой
+`/newbot`. Идентификатор чата: напишите созданному боту любое сообщение
+и запросите его у [@userinfobot](https://t.me/userinfobot).
+
+**MAX.** Токен выдаёт `@MasterBot`. Идентификатор чата приходит
+в обновлениях после первого сообщения боту.
+
+Значения вносятся в `.env`:
+
+```
+TELEGRAM_BOT_TOKEN=123456:AA...
+TELEGRAM_CHAT_ID=123456789
+MAX_BOT_TOKEN=
+MAX_CHAT_ID=
+```
+
+Канал включается, только если заданы и токен, и идентификатор чата.
+Оповещения о неудачных попытках отключаются переменной
+`NOTIFY_ADMIN_LOGIN_FAILED=false` — при активном сканировании их бывает
+много.
+
+После правки `.env` контейнер перезапускается:
+
+```bash
+sudo -u nosbp docker compose -f docker-compose.prod.yml up -d
+```
+
+Отправка выполняется после того, как ответ отдан браузеру, и не задерживает
+вход. Недоступность мессенджера в журнал попадает, но на работу панели
+не влияет.
+
+### 10. Резервное копирование
 
 ```bash
 sudo -u nosbp crontab -e
@@ -277,7 +358,7 @@ sudo -u nosbp crontab -e
 30 4 * * * rclone copy /opt/nosbp/backups remote:nosbp-backups/ --max-age 25h
 ```
 
-### 10. Первый заказчик
+### 11. Первый заказчик
 
 Всё перечисленное доступно в панели; консольные команды удобны для
 скриптов и первичной настройки.
@@ -391,6 +472,7 @@ sudo tail -f /var/log/nginx/nosbp-access.log
 | Кука | HttpOnly, Secure, SameSite=Strict |
 | Формы | Токен CSRF, сравнение за постоянное время |
 | Страницы | CSP без встроенных скриптов и стилей, `X-Frame-Options: DENY` |
+| Оповещения | Сообщение в Telegram или MAX при каждом входе и неудачной попытке |
 
 Учётные записи администраторов создаются только из консоли. Смена пароля
 и перевыпуск второго фактора закрывают все открытые сессии.
@@ -459,6 +541,7 @@ src/nosbp/
   core/        настройки, константы, деньги, логирование, ошибки, middleware
   db/          модели и подключение к базе
   invoices/    поиск или создание счёта
+  notifications/ оповещения в Telegram и MAX
   payments/    строка ГОСТ, отрисовка QR, проверка реквизитов, эндпоинты
   scripts/     консольная утилита администрирования
   storage/     объектное хранилище логотипов
@@ -471,5 +554,9 @@ tests/         тесты, выполняются на PostgreSQL
 ### Технологии
 
 Python 3.13, FastAPI, SQLAlchemy 2 (async), PostgreSQL 17, Alembic,
-segno, Pillow, boto3, structlog, Jinja2, argon2-cffi, pyotp.
+segno, Pillow, boto3, httpx, structlog, Jinja2, argon2-cffi, pyotp.
 Проверки: ruff, mypy в строгом режиме, pytest.
+
+## Лицензия
+
+[MIT](LICENSE)

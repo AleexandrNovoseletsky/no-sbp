@@ -121,7 +121,9 @@ async def test_account_page_opens(logged_in, make_account, make_organization):
     response = await panel.get(f"{ADMIN}/accounts/{account.id}")
     assert response.status_code == 200
     assert account.email in response.text
-    assert "уникальных операций" in response.text
+    assert "уникальных счетов" in response.text
+    assert "обращений к API" in response.text
+    assert "История счетов" in response.text
 
 
 async def test_edit_account(logged_in, session, make_account):
@@ -795,3 +797,61 @@ async def test_negative_daily_limit_is_refused(logged_in, session, make_account)
 
     await session.refresh(account)
     assert account.daily_charge_limit_kopecks != -10_000
+
+
+# ---------------------------------------------------------------------------
+# История счетов
+# ---------------------------------------------------------------------------
+
+
+async def test_invoice_history_is_shown_for_unlimited_account(
+    logged_in, session, make_account, make_organization
+):
+    """Без списаний выписка пуста, но счета всё равно должны быть видны."""
+    from nosbp.core.config import get_settings
+    from nosbp.invoices.service import InvoiceService
+    from nosbp.payments.schemas import PaymentRequest
+
+    panel, _, _ = logged_in
+    account = await make_account(balance_rubles=0)
+    account.is_unlimited = True
+    await session.commit()
+
+    organization = await make_organization(account, alias="romashka")
+    service = InvoiceService(session, get_settings())
+    await service.resolve(
+        account=account,
+        organization=organization,
+        payment=PaymentRequest(sum_kopecks=4_700_000, purpose="Заказ 1234"),
+    )
+    await session.commit()
+
+    response = await panel.get(f"{ADMIN}/accounts/{account.id}?period=all")
+
+    assert response.status_code == 200
+    assert "Заказ 1234" in response.text
+    assert "romashka" in response.text
+    assert "без списаний" in response.text
+    assert "Операций пока не было" in response.text
+
+
+async def test_invoice_without_sum_is_marked_in_history(
+    logged_in, session, make_account, make_organization
+):
+    from nosbp.core.config import get_settings
+    from nosbp.invoices.service import InvoiceService
+    from nosbp.payments.schemas import PaymentRequest
+
+    panel, _, _ = logged_in
+    account = await make_account(balance_rubles=1000)
+    organization = await make_organization(account)
+    service = InvoiceService(session, get_settings())
+    await service.resolve(
+        account=account,
+        organization=organization,
+        payment=PaymentRequest(sum_kopecks=None, purpose="Свободная сумма"),
+    )
+    await session.commit()
+
+    response = await panel.get(f"{ADMIN}/accounts/{account.id}")
+    assert "вводит плательщик" in response.text

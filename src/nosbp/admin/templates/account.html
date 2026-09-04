@@ -20,7 +20,8 @@
 </div>
 
 <div class="kpi">
-  <div><div class="n">{{ stats.invoice_count }}</div><div class="l">уникальных операций</div></div>
+  <div><div class="n">{{ stats.invoice_count }}</div><div class="l">уникальных счетов</div></div>
+  <div><div class="n">{{ stats.hit_count }}</div><div class="l">обращений к API</div></div>
   <div><div class="n">{{ format_roubles(stats.turnover_kopecks, fractional=False) }}</div><div class="l">оборот</div></div>
   <div><div class="n">{{ format_roubles(stats.acquiring_cost_kopecks, fractional=False) }}</div><div class="l">стоил бы эквайринг</div></div>
   <div><div class="n">{{ format_roubles(stats.charged_kopecks) }}</div><div class="l">заплачено нам</div></div>
@@ -200,8 +201,50 @@
   <button type="submit">Выпустить ключ</button>
 </form>
 
+<!-- ---------------- История счетов ---------------- -->
+<h2>История счетов</h2>
+<p class="sub">Последние {{ invoices | length }} за всё время работы.
+   Повторные обращения к одному счёту в течение бесплатного периода
+   не создают новой генерации, но учитываются в столбце «обращений».</p>
+<div class="tablewrap">
+<table>
+  <thead>
+    <tr>
+      <th>Последнее обращение</th><th>Организация</th><th>Назначение</th>
+      <th class="num">Сумма</th><th class="num">Обращений</th>
+      <th class="num">Тарификаций</th><th>Бесплатно до</th>
+    </tr>
+  </thead>
+  <tbody>
+  {% for invoice, alias in invoices %}
+    <tr>
+      <td class="muted mono">{{ invoice.last_seen_at.strftime('%d.%m.%Y %H:%M') }}</td>
+      <td class="mono">{{ alias }}</td>
+      <td>{{ invoice.purpose or '—' }}</td>
+      <td class="num">
+        {% if invoice.sum_kopecks %}
+          {{ format_roubles(invoice.sum_kopecks) }}
+        {% else %}
+          <span class="muted">вводит плательщик</span>
+        {% endif %}
+      </td>
+      <td class="num">{{ invoice.hit_count }}</td>
+      <td class="num">{{ invoice.charge_count }}</td>
+      <td class="muted mono">{{ invoice.expires_at.strftime('%d.%m.%Y') }}</td>
+    </tr>
+  {% else %}
+    <tr><td colspan="7" class="muted">Счетов пока не было.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+
 <!-- ---------------- Выписка ---------------- -->
 <h2>Выписка</h2>
+{% if account.is_unlimited %}
+<p class="sub">Аккаунт обслуживается без списаний, поэтому денежных
+   операций в выписке нет. Учёт счетов и экономии ведётся выше.</p>
+{% endif %}
 <div class="tablewrap">
 <table>
   <thead><tr><th>Когда</th><th>Операция</th><th class="num">Сумма</th><th class="num">Остаток</th><th>Комментарий</th></tr></thead>

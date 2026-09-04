@@ -43,10 +43,18 @@ class OrganizationStats:
     """Уникальных операций: сколько разных счетов выставлено."""
 
     charge_count: int
-    """Сколько раз счета тарифицировались.
+    """Сколько тарифицируемых генераций пришлось на счета организации.
 
-    Больше числа счетов означает, что к каким-то возвращались после
-    истечения бесплатного периода.
+    Превышение числа счетов означает возврат к счёту после истечения
+    бесплатного периода. Фактически списанное показывает
+    :attr:`charged_kopecks`.
+    """
+
+    hit_count: int
+    """Сколько всего было обращений к API, включая бесплатные.
+
+    Показатель не зависит от тарификации и остаётся содержательным для
+    аккаунтов, обслуживаемых без списаний.
     """
 
     invoices_without_sum: int
@@ -95,6 +103,10 @@ class AccountStats:
         return sum(item.charge_count for item in self.organizations)
 
     @property
+    def hit_count(self) -> int:
+        return sum(item.hit_count for item in self.organizations)
+
+    @property
     def turnover_kopecks(self) -> int:
         return sum(item.turnover_kopecks for item in self.organizations)
 
@@ -111,9 +123,12 @@ class AccountStats:
         return sum(item.savings_kopecks for item in self.organizations)
 
 
-_EMPTY_COUNTS: Final[tuple[int, int, int, int]] = (0, 0, 0, 0)
+InvoiceCounts = tuple[int, int, int, int, int]
+"""Счета, тарификации, обращения, известный оборот, счета без суммы."""
 
-InvoiceTotals = dict[uuid.UUID, tuple[int, int, int, int]]
+_EMPTY_COUNTS: Final[InvoiceCounts] = (0, 0, 0, 0, 0)
+
+InvoiceTotals = dict[uuid.UUID, InvoiceCounts]
 ChargeTotals = dict[uuid.UUID, int]
 
 
@@ -170,11 +185,11 @@ async def collect_many_account_stats(
 
 def _build_stats(
     organization: Organization,
-    totals: tuple[int, int, int, int],
+    totals: InvoiceCounts,
     charged_kopecks: int,
 ) -> OrganizationStats:
     """Собирает итоги одной организации, дополняя оборот средним чеком."""
-    invoice_count, charge_count, known_sum, without_sum = totals
+    invoice_count, charge_count, hit_count, known_sum, without_sum = totals
 
     # Счета без суммы дают оборот только если задан средний чек.
     estimated = (organization.average_check_kopecks or 0) * without_sum
@@ -183,6 +198,7 @@ def _build_stats(
         organization=organization,
         invoice_count=invoice_count,
         charge_count=charge_count,
+        hit_count=hit_count,
         invoices_without_sum=without_sum,
         turnover_kopecks=known_sum + estimated,
         charged_kopecks=charged_kopecks,
@@ -209,12 +225,13 @@ async def _invoice_totals(
     account_ids: Sequence[uuid.UUID],
     since: datetime.datetime | None,
 ) -> InvoiceTotals:
-    """Считает по каждой организации: счета, тарификации, оборот, счета без суммы."""
+    """Считает показатели по каждой организации заказчика."""
     query = (
         select(
             Invoice.organization_id,
             func.count(Invoice.id),
             func.coalesce(func.sum(Invoice.charge_count), 0),
+            func.coalesce(func.sum(Invoice.hit_count), 0),
             func.coalesce(func.sum(Invoice.sum_kopecks), 0),
             func.count(Invoice.id).filter(Invoice.sum_kopecks.is_(None)),
         )
@@ -226,7 +243,7 @@ async def _invoice_totals(
 
     result = await session.execute(query)
     return {
-        row[0]: (int(row[1]), int(row[2]), int(row[3]), int(row[4]))
+        row[0]: (int(row[1]), int(row[2]), int(row[3]), int(row[4]), int(row[5]))
         for row in result.all()
     }
 

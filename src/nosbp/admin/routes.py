@@ -10,7 +10,15 @@ from typing import Annotated, Final
 from urllib.parse import urlencode
 
 import structlog
-from fastapi import APIRouter, File, Form, Request, Response, UploadFile
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    File,
+    Form,
+    Request,
+    Response,
+    UploadFile,
+)
 from fastapi.responses import RedirectResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -21,6 +29,7 @@ from nosbp.admin.dependencies import (
     CsrfProtected,
     CurrentAdmin,
     LogoCacheDep,
+    NotifierDep,
     Templates,
 )
 from nosbp.admin.logos import store_logo
@@ -42,9 +51,16 @@ from nosbp.core.errors import (
     NosbpError,
     ValidationError,
 )
+from nosbp.core.middleware import client_address
 from nosbp.core.money import format_roubles, parse_roubles, roubles_input
 from nosbp.db.base import utcnow
 from nosbp.db.models import Account, ApiToken, LedgerEntry, Organization
+from nosbp.invoices.service import list_recent_invoices
+from nosbp.notifications.service import (
+    Notifier,
+    admin_login_failed_message,
+    admin_login_message,
+)
 from nosbp.payments.dependencies import AppSettings, DbSession
 from nosbp.storage.logo_cache import LogoCache
 
@@ -58,6 +74,9 @@ SEE_OTHER: Final = 303
 обновлении страницы."""
 
 LEDGER_PAGE_SIZE: Final = 50
+INVOICE_PAGE_SIZE: Final = 50
+
+SECONDS_PER_HOUR: Final = 60 * 60
 
 PERIOD_MONTH: Final[str] = "month"
 """Период по умолчанию — текущий календарный месяц."""
@@ -95,20 +114,6 @@ def _redirect(settings: Settings, path: str, **flash: str) -> RedirectResponse:
     query = urlencode({key: value for key, value in flash.items() if value})
     target = f"{settings.admin_prefix}{path}"
     return RedirectResponse(f"{target}?{query}" if query else target, SEE_OTHER)
-
-
-def _client_ip(request: Request) -> str:
-    """Определяет адрес клиента с учётом обратного прокси.
-
-    Заголовку X-Forwarded-For можно верить только потому, что снаружи
-    сервис доступен исключительно через собственный прокси: он этот
-    заголовок и проставляет, перетирая присланный клиентом. Значение
-    используется в логах, не в проверках доступа.
-    """
-    forwarded = request.headers.get("x-forwarded-for", "")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
-    return request.client.host if request.client else ""
 
 
 def _page(
@@ -328,40 +333,116 @@ async def login(
     db: DbSession,
     settings: AppSettings,
     templates: Templates,
+    notifier: NotifierDep,
+    background: BackgroundTasks,
     email: Annotated[str, Form()],
     password: Annotated[str, Form()],
     totp_code: Annotated[str, Form()] = "",
 ) -> Response:
-    """Проверяет вход и открывает сессию."""
+    """Проверяет учётные данные и открывает сессию."""
     service = AdminAuthService(db, settings)
+    address = client_address(request)
+    user_agent = request.headers.get("user-agent", "")
+
     try:
         admin = await service.authenticate(
             email=email, password=password, totp_code=totp_code
         )
     except (AdminAuthError, AdminLockedError) as error:
-        log.warning("admin_login_failed", email=email, ip=_client_ip(request))
+        log.warning("admin_login_failed", email=email, address=address)
+        _notify_login_failed(
+            background,
+            notifier=notifier,
+            settings=settings,
+            email=email,
+            address=address,
+            user_agent=user_agent,
+            locked=isinstance(error, AdminLockedError),
+        )
         return _page(
             templates, request, "login.html", settings, err=error.message, email=email
         )
 
     issued = await service.open_session(
-        admin,
-        ip_address=_client_ip(request),
-        user_agent=request.headers.get("user-agent", ""),
+        admin, ip_address=address, user_agent=user_agent
     )
-    log.info("admin_login", admin=admin.email, ip=_client_ip(request))
+    log.info("admin_login", admin=admin.email, address=address)
+    _notify_login(
+        background,
+        notifier=notifier,
+        settings=settings,
+        email=admin.email,
+        address=address,
+        user_agent=user_agent,
+    )
 
     response = _redirect(settings, "/")
     response.set_cookie(
         SESSION_COOKIE_NAME,
         issued.token,
-        max_age=settings.admin_session_ttl_hours * 3600,
+        max_age=settings.admin_session_ttl_hours * SECONDS_PER_HOUR,
         httponly=True,
         secure=settings.admin_cookie_secure,
         samesite="strict",
         path=settings.admin_prefix or "/",
     )
     return response
+
+
+def _notify_login(
+    background: BackgroundTasks,
+    *,
+    notifier: Notifier,
+    settings: Settings,
+    email: str,
+    address: str,
+    user_agent: str,
+) -> None:
+    """Планирует оповещение об успешном входе.
+
+    Отправка выполняется после того, как ответ отдан клиенту: сеть
+    мессенджера не должна задерживать вход.
+    """
+    if not (settings.notify_admin_login and notifier.is_configured):
+        return
+
+    background.add_task(
+        notifier.send,
+        admin_login_message(
+            email=email,
+            address=address,
+            user_agent=user_agent,
+            moment=utcnow(),
+            base_url=settings.public_base_url,
+        ),
+    )
+
+
+def _notify_login_failed(
+    background: BackgroundTasks,
+    *,
+    notifier: Notifier,
+    settings: Settings,
+    email: str,
+    address: str,
+    user_agent: str,
+    locked: bool,
+) -> None:
+    """Планирует оповещение о неудачной попытке входа."""
+    if not (settings.notify_admin_login_failed and notifier.is_configured):
+        return
+
+    background.add_task(
+        notifier.send,
+        admin_login_failed_message(
+            email=email,
+            address=address,
+            user_agent=user_agent,
+            moment=utcnow(),
+            base_url=settings.public_base_url,
+            locked=locked,
+        ),
+    )
 
 
 @router.post("/logout")
@@ -528,6 +609,7 @@ async def _render_account(
         ledger=list(ledger.scalars()),
         ledger_balance=await calculate_balance_from_ledger(db, account.id),
         tokens=await crud.list_tokens(db, account.id),
+        invoices=await list_recent_invoices(db, account.id, limit=INVOICE_PAGE_SIZE),
         period=period,
         issued_token=request.query_params.get("token", ""),
         edit=edit or _account_values(account),

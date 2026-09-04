@@ -249,7 +249,6 @@ files = [
     {file = "certifi-2026.7.22-py3-none-any.whl", hash = "sha256:62f22742b58a1a33014a2b6b706588a8d7e2a88ae7bd1a6ebe8c992928483775"},
     {file = "certifi-2026.7.22.tar.gz", hash = "sha256:741e2c3b351ddf169a738da9f2c048608ff7f2c5cc02f1ebc6b118bb090d5d55"},
 ]
-markers = {main = "extra == \"dev\""}
 
 [[package]]
 name = "cffi"
@@ -529,7 +528,6 @@ files = [
     {file = "httpcore-1.0.9-py3-none-any.whl", hash = "sha256:2d400746a40668fc9dec9810239072b40b4484b640a8c38fd654a024c7a1bf55"},
     {file = "httpcore-1.0.9.tar.gz", hash = "sha256:6e34463af53fd2ab5d807f399a9b45ea31c3dfa2276f15a2c3f00afff6e176e8"},
 ]
-markers = {main = "extra == \"dev\""}
 
 [package.dependencies]
 certifi = "*"
@@ -612,7 +610,6 @@ files = [
     {file = "httpx-0.28.1-py3-none-any.whl", hash = "sha256:d909fcccc110f8c7faf814ca82a9a4d816bc5a6dbfea25d6591d6985b8ba59ad"},
     {file = "httpx-0.28.1.tar.gz", hash = "sha256:75e98c5f16b0f35b567856f597f06ff2270a374470a5c2392242528e3e3e42fc"},
 ]
-markers = {main = "extra == \"dev\""}
 
 [package.dependencies]
 anyio = "*"
@@ -2290,4 +2287,4 @@ dev = ["httpx", "mypy", "pytest", "pytest-asyncio", "ruff"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.13,<4.0"
-content-hash = "1197a7c64a6f96f051ab04241a093d033ecc3737468ff875d8fa79773c2b42d9"
+content-hash = "edf3d5f0d734ef663e895385a89dab8d719418ecec7fb658fb77e334ba610de4"

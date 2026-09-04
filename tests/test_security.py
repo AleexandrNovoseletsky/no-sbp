@@ -3,10 +3,9 @@
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from nosbp.admin.dependencies import build_templates
 from nosbp.core.config import Settings, get_settings
 from nosbp.core.middleware import CONTENT_SECURITY_POLICY, SECURITY_HEADERS
-from nosbp.main import build_logo_cache, create_app
+from nosbp.main import create_app, prepare_state
 from nosbp.storage.memory import MemoryStorage
 from tests.factories import ADMIN_PREFIX
 
@@ -15,8 +14,7 @@ def make_client(settings: Settings) -> AsyncClient:
     """Поднимает приложение с заданными настройками."""
     app = create_app(settings)
     app.state.storage = MemoryStorage()
-    app.state.logo_cache = build_logo_cache(app, settings)
-    app.state.admin_templates = build_templates(settings)
+    prepare_state(app, settings)
     return AsyncClient(
         transport=ASGITransport(app=app),
         base_url="https://panel.test",

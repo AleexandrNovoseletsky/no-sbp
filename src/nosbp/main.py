@@ -19,6 +19,7 @@ from nosbp.core.errors import AdminAuthError, NosbpError
 from nosbp.core.logging import configure_logging
 from nosbp.core.middleware import configure_middleware
 from nosbp.db.session import dispose_engine
+from nosbp.notifications.service import Notifier, build_channels
 from nosbp.payments.routes import router as payments_router
 from nosbp.storage.logo_cache import LogoCache
 from nosbp.storage.s3 import S3Storage
@@ -67,6 +68,18 @@ def build_logo_cache(app: FastAPI, settings: Settings) -> LogoCache:
     )
 
 
+def prepare_state(app: FastAPI, settings: Settings) -> None:
+    """Наполняет состояние приложения общими ресурсами.
+
+    Вынесено из обработчика жизненного цикла, чтобы тесты, поднимающие
+    приложение без него, получали тот же набор ресурсов и не расходились
+    с рабочей конфигурацией по мере добавления новых.
+    """
+    app.state.logo_cache = build_logo_cache(app, settings)
+    app.state.admin_templates = build_templates(settings)
+    app.state.notifier = Notifier(build_channels(settings))
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Готовит и освобождает ресурсы приложения.
@@ -76,10 +89,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     с историей миграций.
     """
     settings: Settings = app.state.settings
-    app.state.logo_cache = build_logo_cache(app, settings)
-    app.state.admin_templates = build_templates(settings)
+    prepare_state(app, settings)
 
-    log.info("service_started", environment=settings.environment)
+    log.info(
+        "service_started",
+        environment=settings.environment,
+        notifications=app.state.notifier.is_configured,
+    )
     yield
     await dispose_engine()
     log.info("service_stopped")

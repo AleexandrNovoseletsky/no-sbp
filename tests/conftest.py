@@ -28,7 +28,6 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from nosbp.admin.dependencies import build_templates as build_admin_templates
 from nosbp.admin.security import (
     SESSION_COOKIE_NAME,
     generate_totp_secret,
@@ -43,7 +42,7 @@ from nosbp.db.session import (
     get_engine,
     get_session_factory,
 )
-from nosbp.main import build_logo_cache, create_app
+from nosbp.main import create_app, prepare_state
 from nosbp.payments.tokens import generate_token, hash_token, token_prefix
 from nosbp.storage.memory import MemoryStorage
 from tests.factories import ADMIN_PREFIX, ORG_DEFAULTS
@@ -113,7 +112,7 @@ async def client(storage: MemoryStorage) -> AsyncIterator[AsyncClient]:
     """
     app = create_app()
     app.state.storage = storage
-    app.state.logo_cache = build_logo_cache(app, get_settings())
+    prepare_state(app, get_settings())
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as http:
@@ -244,8 +243,7 @@ async def panel(storage: MemoryStorage) -> AsyncIterator[AsyncClient]:
     """
     app = create_app()
     app.state.storage = storage
-    app.state.logo_cache = build_logo_cache(app, get_settings())
-    app.state.admin_templates = build_admin_templates(get_settings())
+    prepare_state(app, get_settings())
 
     transport = ASGITransport(app=app)
     async with AsyncClient(

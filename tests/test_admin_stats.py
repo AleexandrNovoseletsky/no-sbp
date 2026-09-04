@@ -234,3 +234,45 @@ async def test_totals_add_up_across_organizations(
     assert stats.savings_kopecks == sum(
         item.savings_kopecks for item in stats.organizations
     )
+
+
+# ---------------------------------------------------------------------------
+# Учёт обращений
+# ---------------------------------------------------------------------------
+
+
+async def test_hit_count_includes_free_requests(
+    session, make_account, make_organization
+):
+    """Повторные обращения не тарифицируются, но должны учитываться."""
+    account = await make_account(balance_rubles=1000)
+    organization = await make_organization(account)
+
+    for _ in range(4):
+        await generate(session, account, organization, 100_00)
+
+    stats = await collect_account_stats(session, account)
+    assert stats.invoice_count == 1
+    assert stats.charge_count == 1
+    assert stats.hit_count == 4
+
+
+async def test_unlimited_account_keeps_full_statistics(
+    session, make_account, make_organization
+):
+    """Отсутствие списаний не должно лишать заказчика показателей."""
+    account = await make_account(balance_rubles=0)
+    account.is_unlimited = True
+    await session.commit()
+
+    organization = await make_organization(account, acquiring_fee_bps=70)
+    await generate(session, account, organization, 4_700_000, 1_000_000)
+    await generate(session, account, organization, 4_700_000)
+
+    stats = await collect_account_stats(session, account)
+
+    assert stats.invoice_count == 2
+    assert stats.hit_count == 3
+    assert stats.charged_kopecks == 0
+    assert stats.turnover_kopecks == 5_700_000
+    assert stats.savings_kopecks == 39_900

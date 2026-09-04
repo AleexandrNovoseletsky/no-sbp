@@ -202,6 +202,41 @@ class Settings(BaseSettings):
         ),
     )
 
+    # ---------------------------------------------------------- оповещения
+    telegram_bot_token: str = Field(
+        default="",
+        description="Токен бота Telegram от @BotFather.",
+    )
+    telegram_chat_id: str = Field(
+        default="",
+        description="Идентификатор чата, куда бот отправляет оповещения.",
+    )
+    max_bot_token: str = Field(
+        default="",
+        description="Токен бота мессенджера MAX.",
+    )
+    max_chat_id: str = Field(
+        default="",
+        description="Идентификатор чата MAX для оповещений.",
+    )
+    notification_timeout_seconds: float = Field(
+        default=5.0,
+        gt=0,
+        description="Таймаут запроса к API мессенджера.",
+    )
+    notify_admin_login: bool = Field(
+        default=True,
+        description="Оповещать об успешном входе в панель управления.",
+    )
+    notify_admin_login_failed: bool = Field(
+        default=True,
+        description=(
+            "Оповещать о неудачных попытках входа. Позволяет заметить "
+            "подбор пароля, но при активном сканировании даёт много "
+            "сообщений."
+        ),
+    )
+
     # --------------------------------------------------------------- ключи
     token_last_used_throttle_seconds: int = Field(
         default=300,

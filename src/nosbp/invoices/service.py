@@ -200,3 +200,23 @@ async def get_invoice_by_public_token(
         select(Invoice).where(Invoice.public_token == public_token)
     )
     return result.scalar_one_or_none()
+
+
+async def list_recent_invoices(
+    session: AsyncSession, account_id: uuid.UUID, *, limit: int
+) -> list[tuple[Invoice, str]]:
+    """Возвращает последние счета заказчика вместе с алиасом организации.
+
+    История счетов не зависит от списаний и остаётся содержательной для
+    аккаунтов, обслуживаемых без тарификации.
+
+    :return: пары «счёт, алиас организации», свежие сверху.
+    """
+    result = await session.execute(
+        select(Invoice, Organization.alias)
+        .join(Organization, Organization.id == Invoice.organization_id)
+        .where(Invoice.account_id == account_id)
+        .order_by(Invoice.last_seen_at.desc())
+        .limit(limit)
+    )
+    return [(invoice, alias) for invoice, alias in result.all()]
