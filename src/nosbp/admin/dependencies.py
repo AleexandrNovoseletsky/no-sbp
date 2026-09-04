@@ -8,15 +8,17 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from nosbp.admin.security import (
-    CSRF_FIELD_NAME,
     SESSION_COOKIE_NAME,
-    csrf_tokens_match,
 )
 from nosbp.admin.service import AdminAuthService
 from nosbp.admin.stats import format_fee_percent
 from nosbp.core.config import Settings, get_settings
 from nosbp.core.errors import AdminAuthError
 from nosbp.core.money import format_roubles, roubles_input
+from nosbp.core.security import (
+    CSRF_FIELD_NAME,
+    csrf_tokens_match,
+)
 from nosbp.db.models import AdminSession, AdminUser
 from nosbp.db.session import get_db
 from nosbp.notifications.service import Notifier
@@ -89,7 +91,7 @@ async def current_admin(
     if session is None:
         raise AdminAuthError("Требуется вход.")
 
-    admin = await db.get(AdminUser, session.admin_id)
+    admin = await db.get(AdminUser, session.owner_id)
     if admin is None or not admin.is_active:
         raise AdminAuthError("Требуется вход.")
 

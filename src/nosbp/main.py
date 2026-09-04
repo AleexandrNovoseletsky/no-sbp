@@ -14,8 +14,10 @@ from fastapi.staticfiles import StaticFiles
 
 from nosbp.admin.dependencies import build_templates
 from nosbp.admin.routes import router as admin_router
+from nosbp.cabinet.dependencies import build_templates as build_cabinet_templates
+from nosbp.cabinet.routes import router as cabinet_router
 from nosbp.core.config import Settings, get_settings
-from nosbp.core.errors import AdminAuthError, NosbpError
+from nosbp.core.errors import AdminAuthError, CabinetAuthError, NosbpError
 from nosbp.core.logging import configure_logging
 from nosbp.core.middleware import configure_middleware
 from nosbp.db.session import dispose_engine
@@ -26,7 +28,8 @@ from nosbp.storage.s3 import S3Storage
 
 log = structlog.get_logger()
 
-ADMIN_STATIC_DIRECTORY: Final[Path] = Path(__file__).parent / "admin" / "static"
+WEB_STATIC_DIRECTORY: Final[Path] = Path(__file__).parent / "admin" / "static"
+"""Каталог со стилями и скриптами. Общий для панели и кабинета."""
 
 PACKAGE_NAME: Final[str] = "nosbp"
 FALLBACK_VERSION: Final[str] = "0.0.0"
@@ -77,6 +80,7 @@ def prepare_state(app: FastAPI, settings: Settings) -> None:
     """
     app.state.logo_cache = build_logo_cache(app, settings)
     app.state.admin_templates = build_templates(settings)
+    app.state.cabinet_templates = build_cabinet_templates(settings)
     app.state.notifier = Notifier(build_channels(settings))
 
 
@@ -142,6 +146,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             f"{settings.admin_prefix}/login?{query}", status_code=SEE_OTHER
         )
 
+    @app.exception_handler(CabinetAuthError)
+    async def handle_cabinet_auth(
+        request: Request, exc: CabinetAuthError
+    ) -> RedirectResponse:
+        """Отправляет на страницу входа в кабинет вместо кода 401."""
+        query = urlencode({"err": exc.message})
+        return RedirectResponse(
+            f"{settings.cabinet_prefix}/login?{query}", status_code=SEE_OTHER
+        )
+
     @app.exception_handler(NosbpError)
     async def handle_domain_error(request: Request, exc: NosbpError) -> JSONResponse:
         """Превращает доменную ошибку в аккуратный JSON.
@@ -161,10 +175,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app.include_router(payments_router)
     app.include_router(admin_router, prefix=settings.admin_prefix)
+    app.include_router(cabinet_router, prefix=settings.cabinet_prefix)
+
+    # Оформление у панели и кабинета общее, поэтому каталог статики один
+    # и монтируется по обоим адресам.
     app.mount(
         f"{settings.admin_prefix}/static",
-        StaticFiles(directory=ADMIN_STATIC_DIRECTORY),
+        StaticFiles(directory=WEB_STATIC_DIRECTORY),
         name="admin-static",
+    )
+    app.mount(
+        f"{settings.cabinet_prefix}/static",
+        StaticFiles(directory=WEB_STATIC_DIRECTORY),
+        name="cabinet-static",
     )
     return app
 

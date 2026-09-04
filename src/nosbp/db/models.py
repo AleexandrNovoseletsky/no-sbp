@@ -21,6 +21,7 @@ from sqlalchemy import (
     DateTime,
     Enum,
     ForeignKey,
+    ForeignKeyConstraint,
     Index,
     Integer,
     String,
@@ -116,6 +117,16 @@ class Account(Base):
         BigInteger, default=None
     )
     """Потолок списаний за календарные сутки. None — без ограничения."""
+
+    failed_attempts: Mapped[int] = mapped_column(Integer, default=0)
+    locked_until: Mapped[datetime.datetime | None] = mapped_column(
+        DateTime(timezone=True), default=None
+    )
+    """До какого момента вход в кабинет заблокирован после неудачных попыток."""
+
+    last_login_at: Mapped[datetime.datetime | None] = mapped_column(
+        DateTime(timezone=True), default=None
+    )
 
     is_unlimited: Mapped[bool] = mapped_column(Boolean, default=False)
     """Обслуживание без списаний.
@@ -419,35 +430,30 @@ class AdminUser(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime.datetime] = created_at_column()
 
-    sessions: Mapped[list["AdminSession"]] = relationship(
-        back_populates="admin", cascade="all, delete-orphan"
-    )
-
     def __repr__(self) -> str:
         return f"<AdminUser {self.email}>"
 
 
-class AdminSession(Base):
-    """Сессия администратора.
+class WebSession(Base):
+    """Общая часть сессий панели управления и личного кабинета.
 
-    Хранится в базе, а не в подписанной куке: так сессию можно отозвать
-    мгновенно, и перезапуск сервиса не выкидывает всех наружу.
+    Сессия хранится в базе, а не в подписанной куке: это позволяет
+    отозвать её немедленно и не завершать сессии при перезапуске сервиса.
+    Внешний ключ на владельца объявляется в наследнике.
     """
 
-    __tablename__ = "admin_sessions"
+    __abstract__ = True
 
     id: Mapped[uuid.UUID] = uuid_pk()
-    admin_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("admin_users.id", ondelete="CASCADE"), index=True
-    )
+    owner_id: Mapped[uuid.UUID] = mapped_column(index=True)
 
     token_hash: Mapped[str] = mapped_column(
         String(SHA256_HEX_LENGTH), unique=True, index=True
     )
-    """В базе только хэш — из дампа рабочую сессию не достать."""
+    """В базе только хэш — из дампа рабочую сессию не восстановить."""
 
     csrf_token: Mapped[str] = mapped_column(String(2 * ADMIN_SESSION_TOKEN_BYTES))
-    """Токен для форм: защищает от запросов, отправленных чужим сайтом."""
+    """Токен форм: защищает от запросов, отправленных чужим сайтом."""
 
     expires_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True))
     last_seen_at: Mapped[datetime.datetime] = mapped_column(
@@ -458,11 +464,29 @@ class AdminSession(Base):
     )
 
     ip_address: Mapped[str] = mapped_column(String(IP_ADDRESS_MAX_LENGTH), default="")
-
     user_agent: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[datetime.datetime] = created_at_column()
 
-    admin: Mapped["AdminUser"] = relationship(back_populates="sessions")
+
+class AdminSession(WebSession):
+    """Сессия администратора панели управления."""
+
+    __tablename__ = "admin_sessions"
+    __table_args__ = (
+        ForeignKeyConstraint(["owner_id"], ["admin_users.id"], ondelete="CASCADE"),
+    )
 
     def __repr__(self) -> str:
-        return f"<AdminSession admin={self.admin_id}>"
+        return f"<AdminSession owner={self.owner_id}>"
+
+
+class AccountSession(WebSession):
+    """Сессия заказчика в личном кабинете."""
+
+    __tablename__ = "account_sessions"
+    __table_args__ = (
+        ForeignKeyConstraint(["owner_id"], ["accounts.id"], ondelete="CASCADE"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<AccountSession owner={self.owner_id}>"

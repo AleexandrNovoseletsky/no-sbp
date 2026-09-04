@@ -31,10 +31,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from nosbp.admin.security import (
     SESSION_COOKIE_NAME,
     generate_totp_secret,
-    hash_password,
 )
 from nosbp.billing.service import BillingService
 from nosbp.core.config import Settings, get_settings
+from nosbp.core.security import (
+    hash_password,
+)
 from nosbp.db.base import Base
 from nosbp.db.models import Account, AdminUser, ApiToken, Organization
 from nosbp.db.session import (
@@ -45,9 +47,10 @@ from nosbp.db.session import (
 from nosbp.main import create_app, prepare_state
 from nosbp.payments.tokens import generate_token, hash_token, token_prefix
 from nosbp.storage.memory import MemoryStorage
-from tests.factories import ADMIN_PREFIX, ORG_DEFAULTS
+from tests.factories import ADMIN_PREFIX, CABINET_PREFIX, ORG_DEFAULTS
 
 TABLES = (
+    "account_sessions",
     "admin_sessions",
     "admin_users",
     "ledger_entries",
@@ -280,6 +283,89 @@ async def logged_in(panel: AsyncClient, make_admin):
 async def _read_csrf(panel: AsyncClient) -> str:
     """Вытаскивает токен CSRF из формы на странице списка заказчиков."""
     page = await panel.get(f"{ADMIN_PREFIX}/accounts/new")
+    assert page.status_code == 200, page.text
+    marker = 'name="csrf_token" value="'
+    start = page.text.index(marker) + len(marker)
+    return page.text[start : page.text.index('"', start)]
+
+
+# ---------------------------------------------------------------------------
+# Личный кабинет
+# ---------------------------------------------------------------------------
+
+CABINET_PASSWORD = "zakazchik-42-secret"
+"""Пароль тестового заказчика — проходит проверку на стойкость."""
+
+
+@pytest_asyncio.fixture
+async def cabinet(storage: MemoryStorage) -> AsyncIterator[AsyncClient]:
+    """Клиент личного кабинета.
+
+    Адрес https, а не http: сессионная кука помечена Secure.
+    """
+    app = create_app()
+    app.state.storage = storage
+    prepare_state(app, get_settings())
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(
+        transport=transport, base_url="https://cabinet.test", follow_redirects=False
+    ) as http:
+        yield http
+
+
+@pytest_asyncio.fixture
+async def make_client_account(session: AsyncSession):
+    """Фабрика заказчиков, умеющих входить в кабинет."""
+
+    async def _make(
+        *,
+        email: str | None = None,
+        balance_rubles: int = 0,
+        is_active: bool = True,
+        is_unlimited: bool = False,
+    ) -> tuple[Account, str]:
+        account = Account(
+            email=email or f"{uuid.uuid4().hex[:8]}@example.com",
+            display_name="ООО Заказчик",
+            password_hash=hash_password(CABINET_PASSWORD),
+            balance_kopecks=0,
+            is_active=is_active,
+            is_unlimited=is_unlimited,
+        )
+        session.add(account)
+        await session.flush()
+
+        if balance_rubles:
+            billing = BillingService(session, get_settings())
+            await billing.adjust(
+                account, balance_rubles * 100, comment="Стартовый баланс"
+            )
+        await session.commit()
+        return account, CABINET_PASSWORD
+
+    return _make
+
+
+@pytest_asyncio.fixture
+async def signed_in(cabinet: AsyncClient, make_client_account):
+    """Кабинет с открытой сессией заказчика.
+
+    Возвращает (клиент, заказчик, токен CSRF).
+    """
+    account, password = await make_client_account()
+    response = await cabinet.post(
+        f"{CABINET_PREFIX}/login", data={"email": account.email, "password": password}
+    )
+    assert response.status_code == 303, response.text
+
+    csrf = await _read_cabinet_csrf(cabinet)
+    return cabinet, account, csrf
+
+
+async def _read_cabinet_csrf(cabinet: AsyncClient) -> str:
+    """Вытаскивает токен CSRF из формы на странице обзора."""
+    page = await cabinet.get(f"{CABINET_PREFIX}/")
     assert page.status_code == 200, page.text
     marker = 'name="csrf_token" value="'
     start = page.text.index(marker) + len(marker)

@@ -202,6 +202,25 @@ class Settings(BaseSettings):
         ),
     )
 
+    # ------------------------------------------------------- личный кабинет
+    cabinet_path_prefix: str = Field(
+        default="/cabinet",
+        min_length=2,
+        pattern=r"^/[A-Za-z0-9_\-/]*[A-Za-z0-9_\-]$",
+        description="Путь, по которому доступен личный кабинет заказчика.",
+    )
+    cabinet_registration_open: bool = Field(
+        default=True,
+        description=(
+            "Разрешена ли самостоятельная регистрация. При закрытой "
+            "регистрации учётные записи заводит оператор через панель."
+        ),
+    )
+    cabinet_session_ttl_hours: int = Field(default=24, ge=1)
+    cabinet_session_idle_minutes: int = Field(default=180, ge=1)
+    cabinet_max_login_attempts: int = Field(default=10, ge=1)
+    cabinet_lockout_minutes: int = Field(default=15, ge=1)
+
     # ---------------------------------------------------------- оповещения
     telegram_bot_token: str = Field(
         default="",
@@ -295,6 +314,11 @@ class Settings(BaseSettings):
     def admin_prefix(self) -> str:
         """Путь панели без завершающего слэша."""
         return self.admin_path_prefix.rstrip("/")
+
+    @property
+    def cabinet_prefix(self) -> str:
+        """Путь личного кабинета без завершающего слэша."""
+        return self.cabinet_path_prefix.rstrip("/")
 
     @property
     def admin_networks(self) -> tuple[IPv4Network | IPv6Network, ...]:

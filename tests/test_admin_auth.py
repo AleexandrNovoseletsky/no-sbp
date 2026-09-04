@@ -7,16 +7,18 @@ import pytest
 
 from nosbp.admin.security import (
     SESSION_COOKIE_NAME,
-    csrf_tokens_match,
-    generate_csrf_token,
-    hash_password,
-    validate_password_strength,
-    verify_password,
     verify_totp,
 )
 from nosbp.admin.service import AdminAuthService
 from nosbp.core.config import get_settings
 from nosbp.core.errors import AdminAuthError, AdminLockedError
+from nosbp.core.security import (
+    csrf_tokens_match,
+    generate_csrf_token,
+    hash_password,
+    validate_password_strength,
+    verify_password,
+)
 from tests.factories import ADMIN_PREFIX
 
 
@@ -231,7 +233,7 @@ async def test_session_round_trip(session, make_admin):
     loaded = await service.load_session(issued.token)
 
     assert loaded is not None
-    assert loaded.admin_id == admin.id
+    assert loaded.owner_id == admin.id
 
 
 async def test_session_token_is_stored_hashed(session, make_admin):
@@ -382,7 +384,7 @@ async def test_login_purges_stale_sessions(session, make_admin):
     total = await session.execute(
         select(func.count())
         .select_from(AdminSession)
-        .where(AdminSession.admin_id == admin.id)
+        .where(AdminSession.owner_id == admin.id)
     )
     assert total.scalar_one() == 1
     assert await service.load_session(live.token) is not None

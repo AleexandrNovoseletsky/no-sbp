@@ -217,6 +217,20 @@ form.inline { display: inline; }
 .kpi .n.alarm { color: var(--warn); }
 .kpi .l { margin-top: 3px; font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-faint); }
 
+.snippet {
+  margin: 0 0 12px;
+  padding: 12px 14px;
+  overflow-x: auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--ink);
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+}
+.snippet code { font: inherit; }
+
 .tabs { display: flex; gap: 6px; margin-bottom: 16px; }
 .tabs a {
   padding: 5px 12px;

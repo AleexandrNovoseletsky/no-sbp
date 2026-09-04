@@ -93,6 +93,20 @@ class AdminLockedError(NosbpError):
     code = "admin_locked"
 
 
+class CabinetAuthError(NosbpError):
+    """Неверная пара «почта — пароль» при входе в личный кабинет."""
+
+    status_code = HTTPStatus.UNAUTHORIZED
+    code = "cabinet_auth_failed"
+
+
+class CabinetLockedError(NosbpError):
+    """Вход в кабинет временно заблокирован после неудачных попыток."""
+
+    status_code = HTTPStatus.TOO_MANY_REQUESTS
+    code = "cabinet_locked"
+
+
 class ValidationError(NosbpError):
     """Параметры запроса или сохраняемые данные не проходят проверку."""
 

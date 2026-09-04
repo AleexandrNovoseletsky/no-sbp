@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+{% block title %}Статистика — NoSBP{% endblock %}
+{% block content %}
+
+<h1>Статистика</h1>
+<p class="sub">Экономия считается по ставке эквайринга, указанной
+   у каждой организации.</p>
+
+<div class="tabs">
+  <a href="{{ cabinet_prefix }}/statistics?period=month"
+     class="{{ 'active' if period == 'month' else '' }}">За текущий месяц</a>
+  <a href="{{ cabinet_prefix }}/statistics?period=all"
+     class="{{ 'active' if period != 'month' else '' }}">За всё время</a>
+</div>
+
+<div class="kpi">
+  <div><div class="n">{{ stats.invoice_count }}</div><div class="l">счетов выставлено</div></div>
+  <div><div class="n">{{ stats.hit_count }}</div><div class="l">обращений к API</div></div>
+  <div><div class="n">{{ format_roubles(stats.turnover_kopecks, fractional=False) }}</div><div class="l">оборот</div></div>
+  <div><div class="n">{{ format_roubles(stats.acquiring_cost_kopecks, fractional=False) }}</div><div class="l">стоил бы эквайринг</div></div>
+  <div><div class="n">{{ format_roubles(stats.charged_kopecks) }}</div><div class="l">стоил сервис</div></div>
+  <div><div class="n">{{ format_roubles(stats.savings_kopecks, fractional=False) }}</div><div class="l">сэкономлено</div></div>
+</div>
+
+<h2>По организациям</h2>
+<div class="tablewrap">
+<table>
+  <thead>
+    <tr>
+      <th>Организация</th><th class="num">Ставка</th><th class="num">Счетов</th>
+      <th class="num">Обращений</th><th class="num">Оборот</th>
+      <th class="num">Эквайринг</th><th class="num">Сэкономлено</th>
+    </tr>
+  </thead>
+  <tbody>
+  {% for item in stats.organizations %}
+    <tr>
+      <td>
+        {{ item.organization.name }}
+        <div class="muted mono">org={{ item.organization.alias }}</div>
+      </td>
+      <td class="num">
+        {{ format_fee_percent(item.acquiring_fee_bps) }}
+        {% if item.turnover_is_estimated %}
+          <div class="muted hint-small">часть по среднему чеку</div>
+        {% endif %}
+      </td>
+      <td class="num">{{ item.invoice_count }}</td>
+      <td class="num">{{ item.hit_count }}</td>
+      <td class="num">{{ format_roubles(item.turnover_kopecks, fractional=False) }}</td>
+      <td class="num">{{ format_roubles(item.acquiring_cost_kopecks, fractional=False) }}</td>
+      <td class="num">{{ format_roubles(item.savings_kopecks, fractional=False) }}</td>
+    </tr>
+  {% else %}
+    <tr><td colspan="7" class="muted">Организаций пока нет.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+
+<h2>История счетов</h2>
+<p class="sub">Последние {{ invoices | length }} за всё время работы.
+   Повторные обращения к одному счёту в течение бесплатного периода
+   не создают новой генерации, но учитываются в столбце «обращений».</p>
+<div class="tablewrap">
+<table>
+  <thead>
+    <tr>
+      <th>Последнее обращение</th><th>Организация</th><th>Назначение</th>
+      <th class="num">Сумма</th><th class="num">Обращений</th>
+      <th class="num">Генераций</th><th>Бесплатно до</th>
+    </tr>
+  </thead>
+  <tbody>
+  {% for invoice, alias in invoices %}
+    <tr>
+      <td class="muted mono">{{ invoice.last_seen_at.strftime('%d.%m.%Y %H:%M') }}</td>
+      <td class="mono">{{ alias }}</td>
+      <td>{{ invoice.purpose or '—' }}</td>
+      <td class="num">
+        {% if invoice.sum_kopecks %}
+          {{ format_roubles(invoice.sum_kopecks) }}
+        {% else %}
+          <span class="muted">вводит плательщик</span>
+        {% endif %}
+      </td>
+      <td class="num">{{ invoice.hit_count }}</td>
+      <td class="num">{{ invoice.charge_count }}</td>
+      <td class="muted mono">{{ invoice.expires_at.strftime('%d.%m.%Y') }}</td>
+    </tr>
+  {% else %}
+    <tr><td colspan="7" class="muted">Счетов пока не было.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endblock %}

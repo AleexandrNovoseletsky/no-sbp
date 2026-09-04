@@ -1,0 +1,163 @@
+{% extends "base.html" %}
+{% block title %}Обзор — NoSBP{% endblock %}
+{% block content %}
+
+<h1>{{ account.display_name }}</h1>
+<p class="sub mono">{{ account.email }}</p>
+
+{% if issued_token %}
+<div class="token-box">
+  <b>Новый ключ.</b> Он показывается один раз — скопируйте сейчас.
+  <span class="mono">{{ issued_token }}</span>
+</div>
+{% endif %}
+
+<div class="tabs">
+  <a href="{{ cabinet_prefix }}/?period=month"
+     class="{{ 'active' if period == 'month' else '' }}">За текущий месяц</a>
+  <a href="{{ cabinet_prefix }}/?period=all"
+     class="{{ 'active' if period != 'month' else '' }}">За всё время</a>
+</div>
+
+<div class="kpi">
+  <div><div class="n">{{ stats.invoice_count }}</div><div class="l">счетов выставлено</div></div>
+  <div><div class="n">{{ stats.hit_count }}</div><div class="l">обращений к API</div></div>
+  <div><div class="n">{{ format_roubles(stats.savings_kopecks, fractional=False) }}</div><div class="l">сэкономлено</div></div>
+  <div>
+    {% if account.account.is_unlimited %}
+      <div class="n">безлимит</div>
+      <div class="l">баланс</div>
+    {% else %}
+      <div class="n {{ 'alarm' if account.account.balance_kopecks < 0 }}">
+        {{ format_roubles(account.account.balance_kopecks) }}
+      </div>
+      <div class="l">
+        {% if account.account.overdraft_until %}
+          в долг до {{ account.account.overdraft_until.strftime('%d.%m') }}
+        {% else %}
+          баланс
+        {% endif %}
+      </div>
+    {% endif %}
+  </div>
+</div>
+
+<!-- ---------------- Организации ---------------- -->
+{% if not account.account.is_unlimited and account.account.balance_kopecks < 0 %}
+<div class="flash err">
+  Баланс отрицательный. Сервис работает в долг
+  {% if account.account.overdraft_until %}
+    до {{ account.account.overdraft_until.strftime('%d.%m.%Y') }};
+  {% else %}
+    ограниченное время;
+  {% endif %}
+  после этого QR-коды перестанут выдаваться. Напишите в поддержку,
+  чтобы пополнить баланс.
+</div>
+{% endif %}
+
+<h2>Ваши организации</h2>
+<p class="sub">Реквизиты, которые попадают в QR-код. Их можно завести
+   несколько — например, ООО и ИП — и выбирать параметром <code>org</code>.</p>
+
+<div class="tablewrap">
+<table>
+  <thead>
+    <tr>
+      <th>Организация</th><th>Реквизиты</th><th>Оформление</th>
+      <th class="num">Счетов</th><th class="num">Сэкономлено</th><th></th>
+    </tr>
+  </thead>
+  <tbody>
+  {% for item in stats.organizations %}
+    {% set org = item.organization %}
+    <tr>
+      <td>
+        <a href="{{ cabinet_prefix }}/organizations/{{ org.id }}">{{ org.name }}</a>
+        <div class="muted mono">org={{ org.alias }}{% if org.is_default %} · по умолчанию{% endif %}</div>
+      </td>
+      <td class="mono muted">
+        {{ org.personal_acc }}<br>{{ org.bank_name }} · БИК {{ org.bic }}
+      </td>
+      <td>
+        <span class="swatch" data-color="{{ org.qr_color }}" title="{{ org.qr_color }}"></span>
+        {% if org.logo_key %}<span class="pill free">логотип</span>{% endif %}
+      </td>
+      <td class="num">{{ item.invoice_count }}</td>
+      <td class="num">{{ format_roubles(item.savings_kopecks, fractional=False) }}</td>
+      <td class="num">
+        <form method="post" action="{{ cabinet_prefix }}/organizations/{{ org.id }}/delete"
+              data-confirm="Удалить организацию «{{ org.alias }}» вместе с её счетами?">
+          <input type="hidden" name="{{ csrf_field }}" value="{{ csrf }}">
+          <button class="ghost" type="submit">Удалить</button>
+        </form>
+      </td>
+    </tr>
+  {% else %}
+    <tr><td colspan="6" class="muted">
+      Организаций пока нет. Добавьте первую — без реквизитов QR-код
+      генерировать не из чего.
+    </td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+<div class="actions">
+  <a class="btn" href="{{ cabinet_prefix }}/organizations/new">Добавить организацию</a>
+</div>
+
+<!-- ---------------- Ключи ---------------- -->
+<h2>Ключи API</h2>
+<p class="sub">Ключ подставляется в адрес картинки. Заведите отдельный ключ
+   на каждую интеграцию — тогда его можно отозвать, не ломая остальные.</p>
+
+<div class="tablewrap">
+<table>
+  <thead><tr><th>Ключ</th><th>Название</th><th>Последнее использование</th><th></th></tr></thead>
+  <tbody>
+  {% for token in tokens %}
+    <tr>
+      <td class="mono">{{ token.prefix }}…
+        {% if token.revoked_at %}<span class="pill off">отозван</span>{% endif %}
+      </td>
+      <td>{{ token.label or '—' }}</td>
+      <td class="muted">
+        {{ token.last_used_at.strftime('%d.%m.%Y %H:%M') if token.last_used_at else 'ни разу' }}
+      </td>
+      <td class="num">
+        {% if not token.revoked_at %}
+        <form method="post" action="{{ cabinet_prefix }}/tokens/{{ token.id }}/revoke"
+              data-confirm="Отозвать ключ {{ token.prefix }}…? Интеграция перестанет работать сразу.">
+          <input type="hidden" name="{{ csrf_field }}" value="{{ csrf }}">
+          <button class="ghost" type="submit">Отозвать</button>
+        </form>
+        {% endif %}
+      </td>
+    </tr>
+  {% else %}
+    <tr><td colspan="4" class="muted">Ключей пока нет.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+<form method="post" action="{{ cabinet_prefix }}/tokens" class="actions">
+  <input type="hidden" name="{{ csrf_field }}" value="{{ csrf }}">
+  <input type="text" name="label" placeholder="Название: RetailCRM, Сайт…" class="field-label">
+  <button type="submit">Выпустить ключ</button>
+</form>
+
+<!-- ---------------- Как подключить ---------------- -->
+<h2>Как подключить</h2>
+<div class="card">
+  <p class="tight">Вставьте эту строку в шаблон письма или счёта, подставив
+     свой ключ, сумму в копейках и назначение платежа:</p>
+  <pre class="snippet"><code>&lt;img src="{{ settings.public_base_url }}/v1/qr?token=ВАШ_КЛЮЧ&amp;org={{ organization_alias }}&amp;sum=4700000&amp;purpose=Заказ+1234"
+     alt="QR-код для оплаты"&gt;</code></pre>
+  <p class="muted">
+    Сумма указывается <b>в копейках</b>: 4700000 — это 47 000 ₽.
+    Параметр <code>org</code> можно не указывать, тогда берётся организация
+    по умолчанию. Повторные обращения к тому же счёту в течение
+    {{ settings.invoice_free_period_days }} дней бесплатны.
+  </p>
+</div>
+{% endblock %}

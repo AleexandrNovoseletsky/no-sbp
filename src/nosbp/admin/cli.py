@@ -16,12 +16,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from nosbp.admin.security import (
     generate_totp_secret,
-    hash_password,
     totp_provisioning_uri,
-    validate_password_strength,
 )
 from nosbp.admin.service import AdminAuthService
 from nosbp.core.config import get_settings
+from nosbp.core.security import (
+    hash_password,
+    validate_password_strength,
+)
 from nosbp.db.base import utcnow
 from nosbp.db.models import AdminUser
 from nosbp.db.session import get_session_factory
