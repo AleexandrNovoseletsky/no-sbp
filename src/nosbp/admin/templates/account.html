@@ -5,6 +5,14 @@
 <h1>{{ account.display_name }}</h1>
 <p class="sub mono">{{ account.email }} · заведён {{ account.created_at.strftime('%d.%m.%Y') }}</p>
 
+{% if invite_url %}
+<div class="token-box">
+  <b>Ссылка для входа в кабинет.</b> Одноразовая, действует
+  {{ settings.cabinet_invite_ttl_hours }} часов. Передайте её заказчику.
+  <span class="mono">{{ invite_url }}</span>
+</div>
+{% endif %}
+
 {% if issued_token %}
 <div class="token-box">
   <b>Новый ключ.</b> Он показывается один раз — скопируйте сейчас.
@@ -200,6 +208,26 @@
   <input type="text" name="label" placeholder="Название: RetailCRM, Сайт…" class="field-label">
   <button type="submit">Выпустить ключ</button>
 </form>
+
+<!-- ---------------- Доступ в кабинет ---------------- -->
+<h2>Доступ в личный кабинет</h2>
+<div class="card">
+  <p class="tight">
+    {% if account.password_hash %}
+      Пароль задан — заказчик входит сам по адресу
+      <span class="mono">{{ settings.public_base_url }}{{ settings.cabinet_path_prefix }}/login</span>.
+      Ссылка ниже понадобится, если пароль забыт.
+    {% else %}
+      Пароль не задан: аккаунт заведён здесь, а не самим заказчиком.
+      Без ссылки войти в кабинет он не сможет.
+    {% endif %}
+  </p>
+  <form method="post" action="{{ admin_prefix }}/accounts/{{ account.id }}/invite">
+    <input type="hidden" name="{{ csrf_field }}" value="{{ csrf }}">
+    <button type="submit">Создать ссылку для установки пароля</button>
+  </form>
+  <p class="muted hint">Прежние выданные ссылки при этом перестают работать.</p>
+</div>
 
 <!-- ---------------- История счетов ---------------- -->
 <h2>История счетов</h2>

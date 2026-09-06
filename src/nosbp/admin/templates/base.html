@@ -9,12 +9,12 @@
 <link rel="stylesheet" href="{{ admin_prefix }}/static/admin.css">
 </head>
 <body>
-{% if admin %}
+{% if viewer %}
 <header>
   <a class="brand" href="{{ admin_prefix }}/">NoSBP</a>
   <a href="{{ admin_prefix }}/">Заказчики</a>
   <span class="spacer"></span>
-  <span class="who">{{ admin.email }}</span>
+  <span class="who">{{ viewer.email }}</span>
   <form method="post" action="{{ admin_prefix }}/logout" class="inline">
     <input type="hidden" name="{{ csrf_field }}" value="{{ csrf }}">
     <button class="ghost" type="submit">Выйти</button>

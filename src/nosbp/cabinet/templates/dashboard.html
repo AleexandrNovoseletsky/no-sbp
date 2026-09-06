@@ -2,8 +2,8 @@
 {% block title %}Обзор — NoSBP{% endblock %}
 {% block content %}
 
-<h1>{{ account.display_name }}</h1>
-<p class="sub mono">{{ account.email }}</p>
+<h1>{{ viewer.display_name }}</h1>
+<p class="sub mono">{{ viewer.email }}</p>
 
 {% if issued_token %}
 <div class="token-box">
@@ -24,16 +24,16 @@
   <div><div class="n">{{ stats.hit_count }}</div><div class="l">обращений к API</div></div>
   <div><div class="n">{{ format_roubles(stats.savings_kopecks, fractional=False) }}</div><div class="l">сэкономлено</div></div>
   <div>
-    {% if account.account.is_unlimited %}
+    {% if account.is_unlimited %}
       <div class="n">безлимит</div>
       <div class="l">баланс</div>
     {% else %}
-      <div class="n {{ 'alarm' if account.account.balance_kopecks < 0 }}">
-        {{ format_roubles(account.account.balance_kopecks) }}
+      <div class="n {{ 'alarm' if account.balance_kopecks < 0 }}">
+        {{ format_roubles(account.balance_kopecks) }}
       </div>
       <div class="l">
-        {% if account.account.overdraft_until %}
-          в долг до {{ account.account.overdraft_until.strftime('%d.%m') }}
+        {% if account.overdraft_until %}
+          в долг до {{ account.overdraft_until.strftime('%d.%m') }}
         {% else %}
           баланс
         {% endif %}
@@ -43,11 +43,11 @@
 </div>
 
 <!-- ---------------- Организации ---------------- -->
-{% if not account.account.is_unlimited and account.account.balance_kopecks < 0 %}
+{% if not account.is_unlimited and account.balance_kopecks < 0 %}
 <div class="flash err">
   Баланс отрицательный. Сервис работает в долг
-  {% if account.account.overdraft_until %}
-    до {{ account.account.overdraft_until.strftime('%d.%m.%Y') }};
+  {% if account.overdraft_until %}
+    до {{ account.overdraft_until.strftime('%d.%m.%Y') }};
   {% else %}
     ограниченное время;
   {% endif %}

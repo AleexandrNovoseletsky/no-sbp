@@ -56,6 +56,7 @@
           <span class="pill off">отключён</span>
         {% endif %}
         {% if row.account.is_unlimited %}<span class="pill free">безлимит</span>{% endif %}
+        {% if not row.account.password_hash %}<span class="pill off">нет входа</span>{% endif %}
       </td>
       <td class="num">
         {% if row.account.is_unlimited %}

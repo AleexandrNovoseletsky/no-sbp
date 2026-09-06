@@ -40,6 +40,13 @@ class Settings(BaseSettings):
         description="local | staging | production. Влияет на формат логов.",
     )
     log_level: str = Field(default="INFO")
+    support_email: str = Field(
+        default="",
+        description=(
+            "Адрес поддержки. Показывается заказчику, когда действие "
+            "требует участия оператора — например, восстановление пароля."
+        ),
+    )
     public_base_url: str = Field(
         default="http://127.0.0.1:8080",
         description=(
@@ -218,6 +225,14 @@ class Settings(BaseSettings):
     )
     cabinet_session_ttl_hours: int = Field(default=24, ge=1)
     cabinet_session_idle_minutes: int = Field(default=180, ge=1)
+    cabinet_invite_ttl_hours: int = Field(
+        default=72,
+        ge=1,
+        description=(
+            "Сколько действует ссылка для установки пароля. Ссылка "
+            "одноразовая и выдаётся оператором."
+        ),
+    )
     cabinet_max_login_attempts: int = Field(default=10, ge=1)
     cabinet_lockout_minutes: int = Field(default=15, ge=1)
 

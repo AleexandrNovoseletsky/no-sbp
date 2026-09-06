@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}Доступ к кабинету — NoSBP{% endblock %}
+{% block content %}
+<div class="card card-narrow">
+  <h1>Не получается войти</h1>
+
+  <p class="sub">Такое бывает в двух случаях.</p>
+
+  <p><b>Пароль забыт.</b> Мы пришлём ссылку для установки нового.</p>
+
+  <p><b>Аккаунт заводили за вас.</b> Тогда пароля просто нет: при
+     регистрации через нас он не задаётся. Нужна та же ссылка.</p>
+
+  <p>Напишите нам с адреса, на который заведён аккаунт:</p>
+
+  {% if settings.support_email %}
+    <p class="mono"><a href="mailto:{{ settings.support_email }}">{{ settings.support_email }}</a></p>
+  {% else %}
+    <p class="muted">Контакты поддержки указаны на сайте сервиса.</p>
+  {% endif %}
+
+  <p class="muted hint">Самостоятельное восстановление по почте появится
+     позже — пока сервис писем не отправляет.</p>
+
+  <div class="actions">
+    <a class="btn ghost" href="{{ cabinet_prefix }}/login">Вернуться ко входу</a>
+  </div>
+</div>
+{% endblock %}

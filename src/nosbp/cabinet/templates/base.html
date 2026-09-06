@@ -8,14 +8,14 @@
 <link rel="stylesheet" href="{{ cabinet_prefix }}/static/admin.css">
 </head>
 <body>
-{% if account %}
+{% if viewer %}
 <header>
   <a class="brand" href="{{ cabinet_prefix }}/">NoSBP</a>
   <a href="{{ cabinet_prefix }}/">Обзор</a>
   <a href="{{ cabinet_prefix }}/statistics">Статистика</a>
   <a href="{{ cabinet_prefix }}/balance">Баланс</a>
   <span class="spacer"></span>
-  <span class="who">{{ account.display_name }}</span>
+  <span class="who">{{ viewer.display_name }}</span>
   <form method="post" action="{{ cabinet_prefix }}/logout" class="inline">
     <input type="hidden" name="{{ csrf_field }}" value="{{ csrf }}">
     <button class="ghost" type="submit">Выйти</button>

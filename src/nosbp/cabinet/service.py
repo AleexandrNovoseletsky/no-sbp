@@ -4,7 +4,7 @@ import datetime
 import uuid
 from typing import Final
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from nosbp.core.config import Settings
@@ -73,9 +73,17 @@ class CabinetAuthService:
         if complaint is not None:
             raise ValidationError(complaint)
 
-        if await self._email_taken(normalized):
+        existing = await self._find(normalized)
+        if existing is not None:
+            # Аккаунт, заведённый оператором, пароля не имеет: занять его
+            # регистрацией нельзя, иначе им завладел бы любой, кто знает
+            # адрес почты. Доступ выдаётся одноразовой ссылкой.
             raise ValidationError(
-                "Этот адрес уже зарегистрирован. Войдите или восстановите пароль."
+                "Этот адрес уже зарегистрирован. Войдите или запросите "
+                "ссылку для установки пароля."
+                if existing.password_hash is not None
+                else "Для этого адреса уже заведён аккаунт. Запросите ссылку "
+                "для установки пароля в поддержке."
             )
 
         account = Account(
@@ -89,13 +97,6 @@ class CabinetAuthService:
         self._db.add(account)
         await self._db.flush()
         return account
-
-    async def _email_taken(self, email: str) -> bool:
-        """Проверяет, занят ли адрес почты."""
-        result = await self._db.execute(
-            select(func.count()).select_from(Account).where(Account.email == email)
-        )
-        return bool(result.scalar_one())
 
     # ------------------------------------------------------------------
     # Вход

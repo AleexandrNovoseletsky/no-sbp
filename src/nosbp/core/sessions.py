@@ -22,7 +22,12 @@ from nosbp.core.security import (
 from nosbp.db.base import utcnow
 from nosbp.db.models import WebSession
 
-MINUTES_IN_HOUR: Final = 60
+LAST_SEEN_THROTTLE_SECONDS: Final = 60
+"""Как часто обновляется отметка активности сессии.
+
+Без ограничения каждая открытая страница означала бы запись в базу.
+Точность до минуты для проверки бездействия избыточна с запасом.
+"""
 
 
 @dataclass(frozen=True)
@@ -94,8 +99,11 @@ class SessionStore[M: WebSession]:
             await self._db.commit()
             return None
 
-        session.last_seen_at = now
-        await self._db.commit()
+        if now - session.last_seen_at >= datetime.timedelta(
+            seconds=LAST_SEEN_THROTTLE_SECONDS
+        ):
+            session.last_seen_at = now
+            await self._db.commit()
         return session
 
     async def close(self, token: str | None) -> None:

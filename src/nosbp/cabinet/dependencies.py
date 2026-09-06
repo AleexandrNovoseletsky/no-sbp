@@ -6,27 +6,29 @@ from typing import Annotated
 from fastapi import Depends, Form, Request
 from fastapi.templating import Jinja2Templates
 
-from nosbp.admin.stats import format_fee_percent
 from nosbp.cabinet.service import SESSION_COOKIE_NAME, CabinetAuthService
 from nosbp.core.config import Settings
 from nosbp.core.errors import CabinetAuthError
-from nosbp.core.money import format_roubles, roubles_input
 from nosbp.core.security import CSRF_FIELD_NAME, csrf_tokens_match
 from nosbp.db.models import Account, AccountSession
 from nosbp.payments.dependencies import AppSettings, DbSession
+from nosbp.web.responses import template_globals
 
 TEMPLATES_DIRECTORY = "templates"
+SHARED_TEMPLATES = Path(__file__).parent.parent / "web" / "templates"
+"""Каталог с шаблонами, общими для панели и кабинета."""
 
 
 def build_templates(settings: Settings) -> Jinja2Templates:
     """Собирает движок шаблонов кабинета."""
-    templates = Jinja2Templates(directory=Path(__file__).parent / TEMPLATES_DIRECTORY)
+    templates = Jinja2Templates(
+        directory=[
+            Path(__file__).parent / TEMPLATES_DIRECTORY,
+            SHARED_TEMPLATES,
+        ]
+    )
     templates.env.globals.update(
-        cabinet_prefix=settings.cabinet_prefix,
-        csrf_field=CSRF_FIELD_NAME,
-        format_roubles=format_roubles,
-        format_fee_percent=format_fee_percent,
-        roubles_input=roubles_input,
+        template_globals("cabinet_prefix", settings.cabinet_prefix)
     )
     return templates
 

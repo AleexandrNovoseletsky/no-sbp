@@ -1,11 +1,11 @@
 """Промежуточные обработчики HTTP-запросов."""
 
-import ipaddress
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
+from ipaddress import IPv4Network, IPv6Network, ip_address
 from typing import Final
 
 import structlog
-from fastapi import Request, Response
+from fastapi import FastAPI, Request, Response
 from fastapi.responses import PlainTextResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.types import ASGIApp
@@ -91,11 +91,15 @@ class AdminNetworkMiddleware(BaseHTTPMiddleware):
     """
 
     def __init__(
-        self, app: ASGIApp, *, prefix: str, networks: tuple[object, ...]
+        self,
+        app: ASGIApp,
+        *,
+        prefix: str,
+        networks: Sequence[IPv4Network | IPv6Network],
     ) -> None:
         super().__init__(app)
         self._prefix = prefix
-        self._networks = networks
+        self._networks = tuple(networks)
 
     async def dispatch(self, request: Request, call_next: CallNext) -> Response:
         if not self._networks or not request.url.path.startswith(self._prefix):
@@ -111,20 +115,20 @@ class AdminNetworkMiddleware(BaseHTTPMiddleware):
     def _is_allowed(self, address: str) -> bool:
         """Проверяет принадлежность адреса разрешённым сетям."""
         try:
-            parsed = ipaddress.ip_address(address)
+            parsed = ip_address(address)
         except ValueError:
             return False
-        return any(parsed in network for network in self._networks)  # type: ignore[operator]
+        return any(parsed in network for network in self._networks)
 
 
-def configure_middleware(app: ASGIApp, settings: Settings) -> None:
+def configure_middleware(app: FastAPI, settings: Settings) -> None:
     """Подключает промежуточные обработчики в порядке применения."""
-    app.add_middleware(  # type: ignore[attr-defined]
+    app.add_middleware(
         AdminNetworkMiddleware,
         prefix=settings.admin_prefix,
         networks=settings.admin_networks,
     )
-    app.add_middleware(  # type: ignore[attr-defined]
+    app.add_middleware(
         SecurityHeadersMiddleware,
         hsts=settings.is_production,
     )

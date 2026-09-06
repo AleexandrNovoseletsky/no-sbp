@@ -7,23 +7,23 @@
 <div class="kpi">
   <div>
     <div class="n">
-      {% if account.account.is_unlimited %}
+      {% if account.is_unlimited %}
         безлимит
       {% else %}
-        {{ format_roubles(account.account.balance_kopecks) }}
+        {{ format_roubles(account.balance_kopecks) }}
       {% endif %}
     </div>
     <div class="l">текущий баланс</div>
   </div>
-  {% if account.account.overdraft_until %}
+  {% if account.overdraft_until %}
   <div>
-    <div class="n alarm">{{ account.account.overdraft_until.strftime('%d.%m.%Y') }}</div>
+    <div class="n alarm">{{ account.overdraft_until.strftime('%d.%m.%Y') }}</div>
     <div class="l">работа в долг до</div>
   </div>
   {% endif %}
 </div>
 
-{% if account.account.is_unlimited %}
+{% if account.is_unlimited %}
   <p class="sub">Ваш аккаунт обслуживается без списаний: счета генерируются
      бесплатно. Статистика при этом ведётся полностью — она на
      <a href="{{ cabinet_prefix }}/statistics">странице статистики</a>.</p>
@@ -36,9 +36,9 @@
       Один счёт стоит {{ format_roubles(settings.invoice_price_kopecks) }}.
       Повторные обращения к тому же счёту в течение
       {{ settings.invoice_free_period_days }} дней бесплатны.
-      {% if account.account.daily_charge_limit_kopecks is not none %}
+      {% if account.daily_charge_limit_kopecks is not none %}
         Суточный лимит списаний:
-        {{ format_roubles(account.account.daily_charge_limit_kopecks, fractional=False) }}.
+        {{ format_roubles(account.daily_charge_limit_kopecks, fractional=False) }}.
       {% endif %}
     </p>
   </div>

@@ -11,10 +11,8 @@ from nosbp.admin.security import (
     SESSION_COOKIE_NAME,
 )
 from nosbp.admin.service import AdminAuthService
-from nosbp.admin.stats import format_fee_percent
 from nosbp.core.config import Settings, get_settings
 from nosbp.core.errors import AdminAuthError
-from nosbp.core.money import format_roubles, roubles_input
 from nosbp.core.security import (
     CSRF_FIELD_NAME,
     csrf_tokens_match,
@@ -23,8 +21,11 @@ from nosbp.db.models import AdminSession, AdminUser
 from nosbp.db.session import get_db
 from nosbp.notifications.service import Notifier
 from nosbp.payments.dependencies import AppSettings, DbSession, LogoCacheDep
+from nosbp.web.responses import template_globals
 
 TEMPLATES_DIRECTORY = "templates"
+SHARED_TEMPLATES = Path(__file__).parent.parent / "web" / "templates"
+"""Каталог с шаблонами, общими для панели и кабинета."""
 
 
 def build_templates(settings: Settings) -> Jinja2Templates:
@@ -34,13 +35,14 @@ def build_templates(settings: Settings) -> Jinja2Templates:
     передаётся в контексте каждой страницы: иначе о нём приходится помнить
     при добавлении любого нового шаблона.
     """
-    templates = Jinja2Templates(directory=Path(__file__).parent / TEMPLATES_DIRECTORY)
+    templates = Jinja2Templates(
+        directory=[
+            Path(__file__).parent / TEMPLATES_DIRECTORY,
+            SHARED_TEMPLATES,
+        ]
+    )
     templates.env.globals.update(
-        admin_prefix=settings.admin_prefix,
-        csrf_field=CSRF_FIELD_NAME,
-        format_roubles=format_roubles,
-        format_fee_percent=format_fee_percent,
-        roubles_input=roubles_input,
+        template_globals("admin_prefix", settings.admin_prefix)
     )
     return templates
 
@@ -63,16 +65,16 @@ NotifierDep = Annotated[Notifier, Depends(get_notifier)]
 class AdminContext:
     """Всё, что нужно странице панели: администратор и его сессия.
 
-    Почта и токен CSRF снимаются копией сразу. Иначе после отката
-    транзакции — а он случается на каждой ошибке ввода — объекты ORM
-    протухают, и обращение к ним из шаблона попыталось бы сходить в базу
-    посреди отрисовки. Синхронный шаблон этого сделать не может и падает.
+    Почта и токен CSRF снимаются копией сразу: после отката транзакции
+    объекты ORM устаревают, и обращение к ним из шаблона привело бы
+    к запросу в базу во время отрисовки.
     """
 
     def __init__(self, admin: AdminUser, session: AdminSession) -> None:
         self.admin = admin
         self.session = session
         self.email = admin.email
+        self.display_name = admin.email
         self.csrf_token = session.csrf_token
 
 

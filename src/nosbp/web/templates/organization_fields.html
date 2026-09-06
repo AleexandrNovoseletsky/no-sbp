@@ -1,0 +1,103 @@
+{#
+  Поля формы организации-получателя.
+
+  Форма одинакова в панели управления и в личном кабинете, поэтому
+  описана один раз. Различаются только адрес отправки и подписи вокруг,
+  которые задаёт вызывающий шаблон.
+#}
+{% macro organization_fields(form, organization, settings, format_fee_percent) %}
+  <div class="grid two">
+    <div class="field">
+      <label for="alias">Короткое имя для параметра org</label>
+      <input id="alias" type="text" name="alias" required value="{{ form.alias }}"
+             placeholder="main" autocomplete="off">
+      <span class="hint">Латиницей, без пробелов. Например, ooo или ip.</span>
+    </div>
+    <div class="field">
+      <label for="name">Наименование получателя платежа</label>
+      <input id="name" type="text" name="name" required value="{{ form.name }}"
+             placeholder="ООО Ромашка">
+    </div>
+  </div>
+
+  <h2>Реквизиты</h2>
+  <p class="sub">Счёт и корр. счёт проверяются по контрольному разряду
+     для указанного БИК — опечатка не пройдёт.</p>
+
+  <div class="grid two">
+    <div class="field">
+      <label for="personal_acc">Расчётный счёт, 20 цифр</label>
+      <input id="personal_acc" type="text" name="personal_acc" required
+             inputmode="numeric" maxlength="20" value="{{ form.personal_acc }}">
+    </div>
+    <div class="field">
+      <label for="corresp_acc">Корр. счёт, 20 цифр</label>
+      <input id="corresp_acc" type="text" name="corresp_acc" required
+             inputmode="numeric" maxlength="20" value="{{ form.corresp_acc }}">
+    </div>
+    <div class="field">
+      <label for="bank_name">Банк</label>
+      <input id="bank_name" type="text" name="bank_name" required
+             value="{{ form.bank_name }}">
+    </div>
+    <div class="field">
+      <label for="bic">БИК, 9 цифр</label>
+      <input id="bic" type="text" name="bic" required inputmode="numeric"
+             maxlength="9" value="{{ form.bic }}">
+    </div>
+    <div class="field">
+      <label for="payee_inn">ИНН, 10 или 12 цифр</label>
+      <input id="payee_inn" type="text" name="payee_inn" required
+             inputmode="numeric" maxlength="12" value="{{ form.payee_inn }}">
+    </div>
+    <div class="field">
+      <label for="kpp">КПП, 9 цифр (у ИП нет)</label>
+      <input id="kpp" type="text" name="kpp" inputmode="numeric" maxlength="9"
+             value="{{ form.kpp }}">
+    </div>
+  </div>
+
+  <h2>Подсчёт экономии</h2>
+  <p class="sub">Нужны, чтобы показывать экономию по сравнению
+     с эквайрингом. На генерацию QR-кода не влияют.</p>
+  <div class="grid two">
+    <div class="field">
+      <label for="fee_percent">Ставка эквайринга, %</label>
+      <input id="fee_percent" type="text" name="fee_percent" inputmode="decimal"
+             placeholder="по умолчанию {{ format_fee_percent(settings.default_acquiring_fee_bps) }}"
+             value="{{ form.fee_percent }}">
+    </div>
+    <div class="field">
+      <label for="average_check">Средний чек, ₽ — для счетов без суммы</label>
+      <input id="average_check" type="text" name="average_check" inputmode="decimal"
+             placeholder="не учитывать" value="{{ form.average_check }}">
+    </div>
+  </div>
+
+  <h2>Оформление</h2>
+  <div class="grid two">
+    <div class="field">
+      <label for="qr_color">Цвет модулей QR</label>
+      <div class="colorline">
+        <input id="qr_color" type="color" name="qr_color" value="{{ form.qr_color }}">
+        <output id="qr_color_hint" class="muted hint"></output>
+      </div>
+    </div>
+    <div class="field">
+      <label for="logo">Логотип в центре кода</label>
+      <input id="logo" type="file" name="logo" accept="image/png,image/jpeg">
+      <div class="muted hint">
+        {% if organization and organization.logo_key %}
+          Загружен. Выберите файл, чтобы заменить.
+        {% else %}
+          PNG или JPEG, до {{ settings.logo_max_bytes // 1024 }} КБ. Необязательно.
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <label class="check">
+    <input type="checkbox" name="is_default" value="1" {{ 'checked' if form.is_default }}>
+    Организация по умолчанию — используется, когда в запросе нет параметра org
+  </label>
+{% endmacro %}
