@@ -44,12 +44,15 @@ from nosbp.db.session import (
     get_engine,
     get_session_factory,
 )
+from nosbp.mail.service import Mailer
 from nosbp.main import create_app, prepare_state
 from nosbp.payments.tokens import generate_token, hash_token, token_prefix
 from nosbp.storage.memory import MemoryStorage
 from tests.factories import ADMIN_PREFIX, CABINET_PREFIX, ORG_DEFAULTS
+from tests.mailbox import RecordingSender
 
 TABLES = (
+    "account_invites",
     "account_sessions",
     "admin_sessions",
     "admin_users",
@@ -106,18 +109,33 @@ def storage() -> MemoryStorage:
     return MemoryStorage()
 
 
-@pytest_asyncio.fixture
-async def client(storage: MemoryStorage) -> AsyncIterator[AsyncClient]:
-    """HTTP-клиент поверх приложения, без реального сетевого сокета.
+@pytest.fixture
+def mailbox() -> RecordingSender:
+    """Почта, которая складывает письма в список вместо отправки."""
+    return RecordingSender()
+
+
+def build_client_app(storage: MemoryStorage, mailbox: RecordingSender):
+    """Собирает приложение с подставленными хранилищем и почтой.
 
     Ресурсы, которые обычно создаёт lifespan, подставляются вручную —
-    так тесты не ходят в S3 и не зависят от порядка запуска.
+    так тесты не ходят ни в S3, ни на почтовый сервер и не зависят
+    от порядка запуска.
     """
+    settings = get_settings()
     app = create_app()
     app.state.storage = storage
-    prepare_state(app, get_settings())
+    prepare_state(app, settings)
+    app.state.mailer = Mailer(mailbox, base_url=settings.public_base_url)
+    return app
 
-    transport = ASGITransport(app=app)
+
+@pytest_asyncio.fixture
+async def client(
+    storage: MemoryStorage, mailbox: RecordingSender
+) -> AsyncIterator[AsyncClient]:
+    """HTTP-клиент поверх приложения, без реального сетевого сокета."""
+    transport = ASGITransport(app=build_client_app(storage, mailbox))
     async with AsyncClient(transport=transport, base_url="http://test") as http:
         yield http
 
@@ -238,17 +256,15 @@ async def make_admin(session: AsyncSession):
 
 
 @pytest_asyncio.fixture
-async def panel(storage: MemoryStorage) -> AsyncIterator[AsyncClient]:
+async def panel(
+    storage: MemoryStorage, mailbox: RecordingSender
+) -> AsyncIterator[AsyncClient]:
     """Клиент панели управления.
 
     Адрес https, а не http: сессионная кука помечена Secure, и по http
     браузер (и httpx) её просто не сохранит — как и должно быть в проде.
     """
-    app = create_app()
-    app.state.storage = storage
-    prepare_state(app, get_settings())
-
-    transport = ASGITransport(app=app)
+    transport = ASGITransport(app=build_client_app(storage, mailbox))
     async with AsyncClient(
         transport=transport, base_url="https://panel.test", follow_redirects=False
     ) as http:
@@ -298,16 +314,14 @@ CABINET_PASSWORD = "zakazchik-42-secret"
 
 
 @pytest_asyncio.fixture
-async def cabinet(storage: MemoryStorage) -> AsyncIterator[AsyncClient]:
+async def cabinet(
+    storage: MemoryStorage, mailbox: RecordingSender
+) -> AsyncIterator[AsyncClient]:
     """Клиент личного кабинета.
 
     Адрес https, а не http: сессионная кука помечена Secure.
     """
-    app = create_app()
-    app.state.storage = storage
-    prepare_state(app, get_settings())
-
-    transport = ASGITransport(app=app)
+    transport = ASGITransport(app=build_client_app(storage, mailbox))
     async with AsyncClient(
         transport=transport, base_url="https://cabinet.test", follow_redirects=False
     ) as http:

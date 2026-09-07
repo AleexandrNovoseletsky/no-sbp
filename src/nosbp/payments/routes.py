@@ -17,19 +17,20 @@ from nosbp.core.constants import (
     PURPOSE_MAX_LENGTH,
 )
 from nosbp.core.errors import NosbpError
-from nosbp.db.models import Account, Organization
+from nosbp.db.models import Account
 from nosbp.invoices.service import InvoiceService
 from nosbp.payments.dependencies import (
     AppSettings,
     DbSession,
     LogoCacheDep,
     authenticate,
+    requisites_of,
     resolve_organization,
 )
 from nosbp.payments.gost import build_gost_payload
 from nosbp.payments.placeholder import render_placeholder_png
 from nosbp.payments.qr import render_qr_png, validate_qr_color
-from nosbp.payments.schemas import PayeeRequisites, PayerInfo, PaymentRequest
+from nosbp.payments.schemas import PayerInfo, PaymentRequest
 from nosbp.storage.logo_cache import LogoCache
 
 router = APIRouter(tags=["qr"])
@@ -106,19 +107,6 @@ EMPTY_BODY: Final = QrRequestBody()
 """Тело по умолчанию: запрос без параметров тоже валиден — плательщик
 введёт сумму в банковском приложении сам. Модель заморожена, поэтому
 общий экземпляр безопасен."""
-
-
-def _requisites_of(organization: Organization) -> PayeeRequisites:
-    """Собирает реквизиты получателя из модели организации."""
-    return PayeeRequisites(
-        name=organization.name,
-        personal_acc=organization.personal_acc,
-        bank_name=organization.bank_name,
-        bic=organization.bic,
-        corresp_acc=organization.corresp_acc,
-        payee_inn=organization.payee_inn,
-        kpp=organization.kpp,
-    )
 
 
 @router.get(
@@ -240,7 +228,7 @@ async def _generate(
 
     # Строка и цвет проверяются до тарификации: списывать деньги за счёт,
     # который потом не удастся нарисовать, нельзя.
-    payload = build_gost_payload(_requisites_of(organization), payment)
+    payload = build_gost_payload(requisites_of(organization), payment)
     color = validate_qr_color(organization.qr_color)
 
     resolution = await InvoiceService(session, settings).resolve(

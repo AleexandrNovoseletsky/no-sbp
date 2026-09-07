@@ -19,6 +19,9 @@ from nosbp.core.constants import (
     DEFAULT_QR_BORDER,
     DEFAULT_QR_SCALE,
     MAX_ACQUIRING_FEE_BPS,
+    SERVICE_NAME,
+    SMTP_DEFAULT_PORTS,
+    SmtpSecurity,
 )
 
 LOCAL_ENVIRONMENT = "local"
@@ -235,6 +238,56 @@ class Settings(BaseSettings):
     )
     cabinet_max_login_attempts: int = Field(default=10, ge=1)
     cabinet_lockout_minutes: int = Field(default=15, ge=1)
+    cabinet_require_email_confirmation: bool = Field(
+        default=False,
+        description=(
+            "Требовать подтверждение адреса почты перед входом. Включать "
+            "стоит только когда отправка писем настроена и проверена: "
+            "иначе новые заказчики останутся без доступа."
+        ),
+    )
+
+    # ------------------------------------------------- восстановление пароля
+    password_reset_ttl_hours: int = Field(
+        default=1,
+        ge=1,
+        description=(
+            "Сколько действует ссылка, запрошенная заказчиком самостоятельно. "
+            "Короче, чем у ссылки от оператора: эту никто не проверяет "
+            "глазами, и запросить её может кто угодно, зная адрес."
+        ),
+    )
+    password_reset_max_per_hour: int = Field(
+        default=3,
+        ge=1,
+        description=(
+            "Сколько писем о восстановлении можно запросить на один адрес "
+            "за час. Ограничение бережёт чужой почтовый ящик от заваливания "
+            "и нашу репутацию отправителя от жалоб на спам."
+        ),
+    )
+    email_confirm_ttl_hours: int = Field(
+        default=48,
+        ge=1,
+        description="Сколько действует ссылка подтверждения адреса почты.",
+    )
+
+    # -------------------------------------------------------- страница оплаты
+    payment_page_enabled: bool = Field(
+        default=False,
+        description=(
+            "Отдавать ли публичную страницу оплаты по ссылке из счёта. "
+            "Пока расчётный счёт не открыт, страницу показывать нельзя: "
+            "она раскрывает реквизиты получателя. Выключено — маршруты "
+            "не регистрируются вовсе, адрес отвечает 404."
+        ),
+    )
+    payment_page_path_prefix: str = Field(
+        default="/pay",
+        min_length=2,
+        pattern=r"^/[A-Za-z0-9_\-/]*[A-Za-z0-9_\-]$",
+        description="Путь публичной страницы оплаты.",
+    )
 
     # ---------------------------------------------------------- оповещения
     telegram_bot_token: str = Field(
@@ -268,6 +321,59 @@ class Settings(BaseSettings):
             "Оповещать о неудачных попытках входа. Позволяет заметить "
             "подбор пароля, но при активном сканировании даёт много "
             "сообщений."
+        ),
+    )
+
+    # ------------------------------------------------------------------ почта
+    # Письма нужны для восстановления пароля и выдачи доступа в кабинет.
+    # Пока настройки пусты, письма не отправляются, а их текст пишется
+    # в журнал: сервис работает, но доступ выдаётся ссылкой из панели.
+    smtp_host: str = Field(
+        default="",
+        description="Адрес почтового сервера, например smtp.yandex.ru.",
+    )
+    smtp_port: int = Field(
+        default=0,
+        ge=0,
+        le=65535,
+        description=(
+            "Порт почтового сервера. Ноль — взять обычный порт выбранного "
+            "режима: 465 для ssl, 587 для starttls."
+        ),
+    )
+    smtp_user: str = Field(default="", description="Логин на почтовом сервере.")
+    smtp_password: str = Field(
+        default="",
+        description=(
+            "Пароль почтового ящика. Для Яндекса и большинства провайдеров "
+            "это пароль приложения, а не пароль от аккаунта."
+        ),
+    )
+    smtp_security: SmtpSecurity = Field(
+        default=SmtpSecurity.SSL,
+        description=(
+            "Как защищается соединение: ssl (порт 465), starttls (587) "
+            "или none — только для релея на том же хосте."
+        ),
+    )
+    smtp_from: str = Field(
+        default="",
+        description=(
+            "Адрес в поле «От кого». Пусто — берётся логин. Должен "
+            "принадлежать домену, для которого настроены SPF и DKIM, "
+            "иначе письма уйдут в спам."
+        ),
+    )
+    smtp_from_name: str = Field(
+        default=SERVICE_NAME,
+        description="Имя отправителя рядом с адресом.",
+    )
+    smtp_timeout_seconds: float = Field(
+        default=15.0,
+        gt=0,
+        description=(
+            "Таймаут отправки письма. Письма уходят фоновой задачей, "
+            "но зависшее соединение всё равно занимает ресурсы процесса."
         ),
     )
 
@@ -334,6 +440,31 @@ class Settings(BaseSettings):
     def cabinet_prefix(self) -> str:
         """Путь личного кабинета без завершающего слэша."""
         return self.cabinet_path_prefix.rstrip("/")
+
+    @property
+    def payment_prefix(self) -> str:
+        """Путь публичной страницы оплаты без завершающего слэша."""
+        return self.payment_page_path_prefix.rstrip("/")
+
+    @property
+    def mail_from(self) -> str:
+        """Адрес отправителя писем."""
+        return self.smtp_from or self.smtp_user
+
+    @property
+    def mail_from_name(self) -> str:
+        """Имя отправителя писем."""
+        return self.smtp_from_name or SERVICE_NAME
+
+    @property
+    def smtp_effective_port(self) -> int:
+        """Порт почтового сервера с учётом выбранного режима."""
+        return self.smtp_port or SMTP_DEFAULT_PORTS[self.smtp_security]
+
+    @property
+    def mail_configured(self) -> bool:
+        """Настроена ли отправка писем."""
+        return bool(self.smtp_host and self.mail_from)
 
     @property
     def admin_networks(self) -> tuple[IPv4Network | IPv6Network, ...]:

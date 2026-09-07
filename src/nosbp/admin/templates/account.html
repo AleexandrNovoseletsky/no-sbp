@@ -4,11 +4,19 @@
 
 <h1>{{ account.display_name }}</h1>
 <p class="sub mono">{{ account.email }} · заведён {{ account.created_at.strftime('%d.%m.%Y') }}</p>
+<p class="sub">
+  {% if account.email_confirmed_at %}
+    <span class="pill on">почта подтверждена {{ account.email_confirmed_at.strftime('%d.%m.%Y') }}</span>
+  {% else %}
+    <span class="pill off">почта не подтверждена</span>
+  {% endif %}
+</p>
 
 {% if invite_url %}
 <div class="token-box">
   <b>Ссылка для входа в кабинет.</b> Одноразовая, действует
-  {{ settings.cabinet_invite_ttl_hours }} часов. Передайте её заказчику.
+  {{ settings.cabinet_invite_ttl_hours }} часов. Она отправлена заказчику
+  на почту — передавайте вручную, только если письмо не дошло.
   <span class="mono">{{ invite_url }}</span>
 </div>
 {% endif %}
@@ -215,8 +223,8 @@
   <p class="tight">
     {% if account.password_hash %}
       Пароль задан — заказчик входит сам по адресу
-      <span class="mono">{{ settings.public_base_url }}{{ settings.cabinet_path_prefix }}/login</span>.
-      Ссылка ниже понадобится, если пароль забыт.
+      <span class="mono">{{ settings.public_base_url }}{{ settings.cabinet_path_prefix }}/login</span>,
+      а забытый пароль восстанавливает без нас, по ссылке «Забыли пароль?».
     {% else %}
       Пароль не задан: аккаунт заведён здесь, а не самим заказчиком.
       Без ссылки войти в кабинет он не сможет.
@@ -224,9 +232,12 @@
   </p>
   <form method="post" action="{{ admin_prefix }}/accounts/{{ account.id }}/invite">
     <input type="hidden" name="{{ csrf_field }}" value="{{ csrf }}">
-    <button type="submit">Создать ссылку для установки пароля</button>
+    <button type="submit">Отправить ссылку на почту</button>
   </form>
-  <p class="muted hint">Прежние выданные ссылки при этом перестают работать.</p>
+  <p class="muted hint">Прежние выданные ссылки при этом перестают работать.
+     {% if not settings.mail_configured %}
+       Почта не настроена: письмо не уйдёт, ссылка появится здесь на странице.
+     {% endif %}</p>
 </div>
 
 <!-- ---------------- История счетов ---------------- -->

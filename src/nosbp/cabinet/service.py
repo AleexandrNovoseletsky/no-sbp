@@ -12,6 +12,7 @@ from nosbp.core.errors import (
     AccountDisabledError,
     CabinetAuthError,
     CabinetLockedError,
+    EmailNotConfirmedError,
     ValidationError,
 )
 from nosbp.core.lockout import ensure_not_locked, register_failure, reset_failures
@@ -107,6 +108,8 @@ class CabinetAuthService:
 
         :raises CabinetLockedError: вход заблокирован после неудачных попыток.
         :raises AccountDisabledError: учётная запись отключена оператором.
+        :raises EmailNotConfirmedError: адрес не подтверждён, а сервис
+            настроен этого требовать.
         :raises CabinetAuthError: неверные учётные данные.
         """
         now = utcnow()
@@ -129,6 +132,18 @@ class CabinetAuthService:
                 "Учётная запись отключена. Напишите в поддержку."
             )
 
+        # Проверка после пароля, а не до: сообщать о состоянии аккаунта
+        # тому, кто пароля не знает, незачем.
+        if (
+            self._settings.cabinet_require_email_confirmation
+            and account.email_confirmed_at is None
+        ):
+            raise EmailNotConfirmedError(
+                "Адрес почты не подтверждён. Откройте ссылку из письма, "
+                "которое мы отправили при регистрации, или запросите "
+                "новое через восстановление пароля."
+            )
+
         if password_needs_rehash(account.password_hash):
             account.password_hash = hash_password(password)
 
@@ -138,10 +153,7 @@ class CabinetAuthService:
 
     async def _find(self, email: str) -> Account | None:
         """Находит заказчика по адресу почты."""
-        result = await self._db.execute(
-            select(Account).where(Account.email == email.strip().lower())
-        )
-        return result.scalar_one_or_none()
+        return await find_by_email(self._db, email)
 
     async def _register_failure(self, account: Account, now: datetime.datetime) -> None:
         """Учитывает неудачную попытку и сохраняет изменение."""
@@ -196,3 +208,15 @@ class CabinetAuthService:
 async def get_account(db: AsyncSession, account_id: uuid.UUID) -> Account | None:
     """Загружает заказчика по идентификатору."""
     return await db.get(Account, account_id)
+
+
+async def find_by_email(db: AsyncSession, email: str) -> Account | None:
+    """Находит заказчика по адресу почты.
+
+    Адрес приводится к нижнему регистру и обрезается по краям: в базе он
+    хранится нормализованным, а из формы приходит как введено.
+    """
+    result = await db.execute(
+        select(Account).where(Account.email == email.strip().lower())
+    )
+    return result.scalar_one_or_none()

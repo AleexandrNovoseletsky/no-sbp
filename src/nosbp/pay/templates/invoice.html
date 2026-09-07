@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}Оплата — {{ organization.name }}{% endblock %}
+{% block content %}
+
+<h1>Оплата по реквизитам</h1>
+<p class="payee">Получатель: {{ organization.name }}</p>
+
+{% if invoice.sum_kopecks %}
+  <div class="amount">{{ format_roubles(invoice.sum_kopecks) }}</div>
+{% else %}
+  <div class="amount free">Сумму укажете в приложении банка</div>
+{% endif %}
+{% if invoice.purpose %}
+  <p class="purpose">{{ invoice.purpose }}</p>
+{% endif %}
+
+<div class="qr">
+  <img src="{{ pay_prefix }}/{{ invoice.public_token }}/qr.png"
+       alt="QR-код для оплаты по реквизитам" width="260" height="260">
+  <p class="hint">Откройте приложение банка, выберите оплату по QR-коду
+     и наведите камеру. Реквизиты подставятся сами.</p>
+</div>
+
+<h2>Или введите реквизиты вручную</h2>
+<table>
+  <tr><th>Получатель</th><td>{{ requisites.name }}</td></tr>
+  <tr><th>ИНН</th><td class="mono">{{ requisites.payee_inn }}</td></tr>
+  {% if requisites.kpp %}
+    <tr><th>КПП</th><td class="mono">{{ requisites.kpp }}</td></tr>
+  {% endif %}
+  <tr><th>Расчётный счёт</th><td class="mono">{{ requisites.personal_acc }}</td></tr>
+  <tr><th>Банк</th><td>{{ requisites.bank_name }}</td></tr>
+  <tr><th>БИК</th><td class="mono">{{ requisites.bic }}</td></tr>
+  <tr><th>Корр. счёт</th><td class="mono">{{ requisites.corresp_acc }}</td></tr>
+  {% if invoice.sum_kopecks %}
+    <tr><th>Сумма</th><td>{{ format_roubles(invoice.sum_kopecks) }}</td></tr>
+  {% endif %}
+  {% if invoice.purpose %}
+    <tr><th>Назначение платежа</th><td>{{ invoice.purpose }}</td></tr>
+  {% endif %}
+</table>
+
+{% endblock %}

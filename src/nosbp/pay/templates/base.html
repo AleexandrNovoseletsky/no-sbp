@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>{% block title %}Оплата по реквизитам{% endblock %}</title>
+<link rel="stylesheet" href="{{ pay_prefix }}/static/pay.css">
+</head>
+<body>
+<main class="sheet">
+  {% block content %}{% endblock %}
+</main>
+<footer>
+  Счёт сформирован сервисом NoSBP. Платёж идёт напрямую на расчётный счёт
+  получателя — сервис денег не принимает.
+</footer>
+</body>
+</html>

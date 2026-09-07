@@ -31,6 +31,7 @@ from nosbp.core.money import format_roubles, to_kopecks
 from nosbp.db.base import utcnow
 from nosbp.db.models import Account, ApiToken, LedgerEntry
 from nosbp.db.session import dispose_engine, get_session_factory
+from nosbp.mail.cli import register_mail_commands
 from nosbp.storage.s3 import S3Storage
 
 DEFAULT_STATEMENT_LIMIT: Final = 20
@@ -340,6 +341,7 @@ def build_parser() -> argparse.ArgumentParser:
     balance.set_defaults(func=cmd_balance)
 
     register_admin_commands(sub)
+    register_mail_commands(sub)
 
     return parser
 

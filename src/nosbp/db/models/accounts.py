@@ -1,12 +1,14 @@
 """Модели заказчика: учётная запись, организации, ключи, приглашения."""
 
 import datetime
+import enum
 import uuid
 
 from sqlalchemy import (
     BigInteger,
     Boolean,
     DateTime,
+    Enum,
     ForeignKey,
     Integer,
     String,
@@ -37,6 +39,24 @@ from nosbp.db.base import Base, created_at_column, uuid_pk
 
 MAX_INN_LENGTH = max(INN_LENGTHS)
 """Колонка рассчитана на самый длинный вариант — ИНН физлица и ИП."""
+
+INVITE_PURPOSE_MAX_LENGTH = 16
+"""Длина колонки с назначением ссылки."""
+
+
+class InvitePurpose(enum.StrEnum):
+    """Зачем выдана одноразовая ссылка.
+
+    Назначение хранится рядом с токеном, чтобы ссылку нельзя было
+    использовать не по адресу: письмо с подтверждением почты не должно
+    открывать форму смены пароля.
+    """
+
+    PASSWORD = "password"
+    """Установка или смена пароля: и первый вход, и восстановление."""
+
+    EMAIL = "email"
+    """Подтверждение адреса почты."""
 
 
 class Account(Base):
@@ -87,6 +107,17 @@ class Account(Base):
     last_login_at: Mapped[datetime.datetime | None] = mapped_column(
         DateTime(timezone=True), default=None
     )
+
+    email_confirmed_at: Mapped[datetime.datetime | None] = mapped_column(
+        DateTime(timezone=True), default=None
+    )
+    """Когда владелец подтвердил, что почта его.
+
+    Подтверждением считается переход по любой ссылке, отправленной на этот
+    адрес: попасть в письмо может только тот, у кого есть доступ к ящику.
+    Без подтверждения восстановление пароля работает, но письмо уходит
+    на непроверенный адрес — поэтому подтверждение просим сразу.
+    """
 
     is_unlimited: Mapped[bool] = mapped_column(Boolean, default=False)
     """Обслуживание без списаний.
@@ -233,12 +264,11 @@ class ApiToken(Base):
 
 
 class AccountInvite(Base):
-    """Одноразовая ссылка для установки пароля заказчика.
+    """Одноразовая ссылка, отправленная заказчику на почту.
 
-    Решает две задачи одним механизмом: вход в аккаунт, заведённый
-    оператором, и восстановление забытого пароля. Ссылку выдаёт оператор
-    и передаёт заказчику; отправка почтой появится вместе с настройкой
-    почтового сервера.
+    Один механизм закрывает три случая: первый вход в аккаунт, заведённый
+    оператором, восстановление забытого пароля и подтверждение адреса.
+    Различает их поле :attr:`purpose`.
     """
 
     __tablename__ = "account_invites"
@@ -253,6 +283,18 @@ class AccountInvite(Base):
     )
     """В базе только хэш: из дампа рабочую ссылку не восстановить."""
 
+    purpose: Mapped[InvitePurpose] = mapped_column(
+        # native_enum=False — значение хранится строкой с CHECK: добавить
+        # новое назначение можно обычной миграцией, без ALTER TYPE.
+        Enum(
+            InvitePurpose,
+            native_enum=False,
+            length=INVITE_PURPOSE_MAX_LENGTH,
+            validate_strings=True,
+        ),
+        default=InvitePurpose.PASSWORD,
+    )
+
     expires_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True))
     used_at: Mapped[datetime.datetime | None] = mapped_column(
         DateTime(timezone=True), default=None
@@ -266,4 +308,4 @@ class AccountInvite(Base):
         return self.used_at is None and now < self.expires_at
 
     def __repr__(self) -> str:
-        return f"<AccountInvite account={self.account_id}>"
+        return f"<AccountInvite {self.purpose} account={self.account_id}>"

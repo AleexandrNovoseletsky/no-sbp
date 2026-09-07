@@ -107,6 +107,17 @@ class CabinetLockedError(NosbpError):
     code = "cabinet_locked"
 
 
+class EmailNotConfirmedError(NosbpError):
+    """Адрес почты не подтверждён, а сервис настроен этого требовать.
+
+    Отдельно от неверного пароля: учётные данные верны, и заказчику нужно
+    объяснить, что делать, а не отправлять его подбирать пароль заново.
+    """
+
+    status_code = HTTPStatus.FORBIDDEN
+    code = "email_not_confirmed"
+
+
 class ValidationError(NosbpError):
     """Параметры запроса или сохраняемые данные не проходят проверку."""
 

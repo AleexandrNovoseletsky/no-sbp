@@ -17,11 +17,15 @@ from nosbp.admin.routes import router as admin_router
 from nosbp.cabinet.dependencies import build_templates as build_cabinet_templates
 from nosbp.cabinet.routes import router as cabinet_router
 from nosbp.core.config import Settings, get_settings
+from nosbp.core.constants import SERVICE_NAME
 from nosbp.core.errors import AdminAuthError, CabinetAuthError, NosbpError
 from nosbp.core.logging import configure_logging
 from nosbp.core.middleware import configure_middleware
 from nosbp.db.session import dispose_engine
+from nosbp.mail.service import build_mailer
 from nosbp.notifications.service import Notifier, build_channels
+from nosbp.pay.dependencies import build_templates as build_pay_templates
+from nosbp.pay.routes import router as pay_router
 from nosbp.payments.routes import router as payments_router
 from nosbp.storage.logo_cache import LogoCache
 from nosbp.storage.s3 import S3Storage
@@ -31,13 +35,16 @@ log = structlog.get_logger()
 WEB_STATIC_DIRECTORY: Final[Path] = Path(__file__).parent / "admin" / "static"
 """Каталог со стилями и скриптами. Общий для панели и кабинета."""
 
+PAY_STATIC_DIRECTORY: Final[Path] = Path(__file__).parent / "pay" / "static"
+"""Каталог стилей публичной страницы оплаты."""
+
 PACKAGE_NAME: Final[str] = "nosbp"
 FALLBACK_VERSION: Final[str] = "0.0.0"
 
 SEE_OTHER: Final = 303
 """Код перенаправления после неудачной проверки сессии."""
 
-TITLE: Final[str] = "NoSBP"
+TITLE: Final[str] = SERVICE_NAME
 DESCRIPTION: Final[str] = (
     "Генерация QR-кодов для оплаты по банковским реквизитам по ГОСТ Р 56042-2014."
 )
@@ -81,7 +88,9 @@ def prepare_state(app: FastAPI, settings: Settings) -> None:
     app.state.logo_cache = build_logo_cache(app, settings)
     app.state.admin_templates = build_templates(settings)
     app.state.cabinet_templates = build_cabinet_templates(settings)
+    app.state.pay_templates = build_pay_templates(settings)
     app.state.notifier = Notifier(build_channels(settings))
+    app.state.mailer = build_mailer(settings)
 
 
 @asynccontextmanager
@@ -99,6 +108,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         "service_started",
         environment=settings.environment,
         notifications=app.state.notifier.is_configured,
+        mail=app.state.mailer.is_configured,
+        payment_page=settings.payment_page_enabled,
     )
     yield
     await dispose_engine()
@@ -176,6 +187,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(payments_router)
     app.include_router(admin_router, prefix=settings.admin_prefix)
     app.include_router(cabinet_router, prefix=settings.cabinet_prefix)
+
+    # Страница оплаты раскрывает реквизиты получателя всем, у кого есть
+    # ссылка. Пока она не нужна, маршруты не регистрируются вовсе:
+    # выключенная настройка означает честный 404, а не скрытую страницу.
+    if settings.payment_page_enabled:
+        app.mount(
+            f"{settings.payment_prefix}/static",
+            StaticFiles(directory=PAY_STATIC_DIRECTORY),
+            name="pay-static",
+        )
+        app.include_router(pay_router, prefix=settings.payment_prefix)
 
     # Оформление у панели и кабинета общее, поэтому каталог статики один
     # и монтируется по обоим адресам.

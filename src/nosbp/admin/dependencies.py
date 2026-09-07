@@ -19,8 +19,8 @@ from nosbp.core.security import (
 )
 from nosbp.db.models import AdminSession, AdminUser
 from nosbp.db.session import get_db
-from nosbp.notifications.service import Notifier
 from nosbp.payments.dependencies import AppSettings, DbSession, LogoCacheDep
+from nosbp.web.dependencies import MailerDep, NotifierDep
 from nosbp.web.responses import template_globals
 
 TEMPLATES_DIRECTORY = "templates"
@@ -51,15 +51,6 @@ def get_templates(request: Request) -> Jinja2Templates:
     """Отдаёт движок шаблонов, созданный при старте приложения."""
     templates: Jinja2Templates = request.app.state.admin_templates
     return templates
-
-
-def get_notifier(request: Request) -> Notifier:
-    """Отдаёт рассылку оповещений, созданную при старте приложения."""
-    notifier: Notifier = request.app.state.notifier
-    return notifier
-
-
-NotifierDep = Annotated[Notifier, Depends(get_notifier)]
 
 
 class AdminContext:
@@ -128,6 +119,7 @@ __all__ = [
     "CsrfProtected",
     "CurrentAdmin",
     "LogoCacheDep",
+    "MailerDep",
     "NotifierDep",
     "Templates",
     "build_templates",

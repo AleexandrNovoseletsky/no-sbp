@@ -5,6 +5,17 @@
 <h1>{{ viewer.display_name }}</h1>
 <p class="sub mono">{{ viewer.email }}</p>
 
+{% if not account.email_confirmed_at %}
+<div class="flash err">
+  <b>Адрес почты не подтверждён.</b>
+  Пока адрес не подтверждён, восстановить пароль по нему нельзя.
+  <form method="post" action="{{ cabinet_prefix }}/confirm" class="inline">
+    <input type="hidden" name="{{ csrf_field }}" value="{{ csrf }}">
+    <button class="ghost" type="submit">Выслать письмо ещё раз</button>
+  </form>
+</div>
+{% endif %}
+
 {% if issued_token %}
 <div class="token-box">
   <b>Новый ключ.</b> Он показывается один раз — скопируйте сейчас.

@@ -26,6 +26,7 @@ dependencies = [
     "jinja2 (>=3.1)",
     "python-multipart (>=0.0.20)",
     "httpx (>=0.28,<0.29)",
+    "aiosmtplib (>=4.0,<5.0)",
 ]
 
 [project.optional-dependencies]

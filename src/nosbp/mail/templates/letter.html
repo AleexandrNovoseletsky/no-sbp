@@ -1,0 +1,59 @@
+{#
+  Оформление письма. Единственный шаблон на все письма сервиса.
+
+  Вёрстка намеренно архаична — таблицы и стили прямо в атрибутах.
+  Почтовые клиенты вырезают тег <style> и не понимают ни flex, ни grid,
+  поэтому «правильная» разметка развалилась бы у половины получателей.
+#}
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0"
+       style="background:#f4f5f7;padding:24px 12px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif">
+  <tr>
+    <td align="center">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0"
+             style="max-width:520px;background:#ffffff;border-radius:12px;padding:32px">
+        <tr>
+          <td style="font-size:18px;font-weight:600;color:#101828;padding-bottom:16px">
+            {{ letter.heading }}
+          </td>
+        </tr>
+        {% for paragraph in letter.paragraphs %}
+        <tr>
+          <td style="font-size:15px;line-height:1.6;color:#344054;padding-bottom:12px">
+            {{ paragraph }}
+          </td>
+        </tr>
+        {% endfor %}
+        {% if letter.action_url %}
+        <tr>
+          <td style="padding:12px 0 20px">
+            <a href="{{ letter.action_url }}"
+               style="display:inline-block;background:#2f6fed;color:#ffffff;text-decoration:none;font-size:15px;font-weight:600;padding:12px 22px;border-radius:8px">
+              {{ letter.action_label }}
+            </a>
+          </td>
+        </tr>
+        <tr>
+          {# Кнопка не откроется в текстовом режиме и в части клиентов —
+             адрес дублируется строкой, иначе письмо станет бесполезным. #}
+          <td style="font-size:13px;line-height:1.5;color:#667085;padding-bottom:20px;word-break:break-all">
+            Если кнопка не работает, скопируйте адрес в браузер:<br>
+            <span style="color:#2f6fed">{{ letter.action_url }}</span>
+          </td>
+        </tr>
+        {% endif %}
+        {% for line in letter.footer %}
+        <tr>
+          <td style="font-size:13px;line-height:1.5;color:#667085;padding-bottom:6px">
+            {{ line }}
+          </td>
+        </tr>
+        {% endfor %}
+        <tr>
+          <td style="border-top:1px solid #eaecf0;padding-top:16px;font-size:12px;color:#98a2b3">
+            {{ service_name }} — {{ base_url }}
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+</table>

@@ -15,6 +15,7 @@ from nosbp.admin.dependencies import (
     AdminContext,
     CsrfProtected,
     CurrentAdmin,
+    MailerDep,
     Templates,
 )
 from nosbp.admin.stats import (
@@ -23,7 +24,7 @@ from nosbp.admin.stats import (
     month_start,
 )
 from nosbp.billing.service import BillingService, calculate_balance_from_ledger
-from nosbp.cabinet import invites
+from nosbp.cabinet import access
 from nosbp.core.config import Settings
 from nosbp.core.errors import NosbpError, ValidationError
 from nosbp.core.money import format_roubles, parse_roubles, roubles_input
@@ -337,30 +338,43 @@ async def delete(
 
 @router.post("/accounts/{account_id}/invite")
 async def invite(
-    db: DbSession, settings: AppSettings, viewer: CsrfProtected, account_id: uuid.UUID
+    db: DbSession,
+    settings: AppSettings,
+    mailer: MailerDep,
+    viewer: CsrfProtected,
+    account_id: uuid.UUID,
 ) -> RedirectResponse:
-    """Выдаёт одноразовую ссылку для установки пароля.
+    """Отправляет заказчику ссылку для установки пароля.
 
     Нужна и для аккаунтов, заведённых оператором (пароля у них нет),
-    и для восстановления забытого пароля. Прежние выданные ссылки
-    при этом гасятся.
+    и когда заказчик не справился с восстановлением сам. Прежние
+    выданные ссылки при этом гасятся.
+
+    Письмо отправляется сразу, а не фоновой задачей: оператор должен
+    увидеть, дошло оно или нет. Ссылка в любом случае показывается
+    на странице — её можно передать заказчику другим каналом.
     """
     account = await crud.get_account(db, account_id)
-    token = await invites.issue(
-        db, account, ttl_hours=settings.cabinet_invite_ttl_hours
-    )
+    delivery = await access.prepare_access_invite(db, settings, account)
     await db.commit()
 
-    log.info("admin_invite_issued", admin=viewer.email, account=account.email)
+    delivered = await mailer.send(delivery.to, delivery.letter)
+    log.info(
+        "admin_invite_issued",
+        admin=viewer.email,
+        account=account.email,
+        delivered=delivered,
+    )
+
+    lifetime = f"она одноразовая и действует {settings.cabinet_invite_ttl_hours} ч"
     return redirect(
         settings.admin_prefix,
         f"/accounts/{account_id}",
-        invite=invites.build_url(
-            settings.public_base_url, settings.cabinet_prefix, token
-        ),
+        invite=delivery.url,
         ok=(
-            "Ссылка создана. Передайте её заказчику: она одноразовая "
-            f"и действует {settings.cabinet_invite_ttl_hours} часов."
+            f"Письмо отправлено на {account.email} — {lifetime}."
+            if delivered
+            else f"Письмо отправить не удалось: передайте ссылку сами, {lifetime}."
         ),
     )
 

@@ -16,6 +16,7 @@ from nosbp.core.errors import (
 from nosbp.db.base import utcnow
 from nosbp.db.models import Account, ApiToken, Organization
 from nosbp.db.session import get_db
+from nosbp.payments.schemas import PayeeRequisites
 from nosbp.payments.tokens import hash_token
 from nosbp.storage.logo_cache import LogoCache
 
@@ -101,6 +102,23 @@ async def authenticate(
         session, api_token, utcnow(), settings.token_last_used_throttle_seconds
     )
     return account
+
+
+def requisites_of(organization: Organization) -> PayeeRequisites:
+    """Собирает реквизиты получателя из модели организации.
+
+    Контрольные разряды проверены при сохранении организации, поэтому
+    схема здесь — типизированный контракт, а не повторная валидация.
+    """
+    return PayeeRequisites(
+        name=organization.name,
+        personal_acc=organization.personal_acc,
+        bank_name=organization.bank_name,
+        bic=organization.bic,
+        corresp_acc=organization.corresp_acc,
+        payee_inn=organization.payee_inn,
+        kpp=organization.kpp,
+    )
 
 
 async def resolve_organization(
