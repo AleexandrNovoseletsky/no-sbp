@@ -52,9 +52,17 @@ services:
         condition: service_healthy
       minio:
         condition: service_started
+    # Настройки читаются из .env — того же файла, что и при запуске
+    # без Docker. Перечислять их здесь по одной нельзя: каждая новая
+    # настройка сервиса молча не доезжала бы до контейнера.
+    env_file:
+      - path: .env
+        required: false
     environment:
+      # Переопределяет .env: внутри сети compose база и хранилище
+      # доступны по именам сервисов, а не по портам, проброшенным
+      # на хост.
       ENVIRONMENT: local
-      LOG_LEVEL: INFO
       DATABASE_URL: postgresql+asyncpg://nosbp:nosbp@postgres:5432/nosbp
       S3_ENDPOINT_URL: http://minio:9000
       S3_BUCKET: nosbp-logos

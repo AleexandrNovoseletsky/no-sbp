@@ -1,0 +1,27 @@
+# Что не должно попадать в контекст сборки.
+#
+# Dockerfile копирует только нужные каталоги, но контекст целиком
+# отправляется демону: без этого файла туда уезжают история git,
+# виртуальное окружение и резервные копии базы.
+
+.git
+.github
+.venv
+.env
+.env.*
+!.env.example
+
+__pycache__
+*.pyc
+.mypy_cache
+.pytest_cache
+.ruff_cache
+
+backups
+data
+tests
+docs
+*.md
+!README.md
+
+.DS_Store

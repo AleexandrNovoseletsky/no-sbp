@@ -37,27 +37,18 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    # Настройки читаются из .env целиком, а не переписываются сюда
+    # по одной: перечисление приходилось бы дополнять при каждой новой
+    # настройке, и забытая переменная не доезжала бы до контейнера молча.
+    # Состав файла описан в deploy/env.production.example.
+    env_file: .env
     environment:
+      # Единственное, что не из .env: рабочее окружение определяется
+      # тем, каким файлом compose поднят сервис.
       ENVIRONMENT: production
-      LOG_LEVEL: ${LOG_LEVEL:-INFO}
-      DATABASE_URL: ${DATABASE_URL}
-      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-https://nosbp.ru}
-      SUPPORT_EMAIL: ${SUPPORT_EMAIL:-}
-      ADMIN_PATH_PREFIX: ${ADMIN_PATH_PREFIX:-/console}
-      ADMIN_ALLOWED_NETWORKS: ${ADMIN_ALLOWED_NETWORKS:-}
-      CABINET_PATH_PREFIX: ${CABINET_PATH_PREFIX:-/cabinet}
-      CABINET_REGISTRATION_OPEN: ${CABINET_REGISTRATION_OPEN:-true}
-      ADMIN_REQUIRE_TOTP: ${ADMIN_REQUIRE_TOTP:-true}
-      ADMIN_COOKIE_SECURE: ${ADMIN_COOKIE_SECURE:-true}
-      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
-      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
-      MAX_BOT_TOKEN: ${MAX_BOT_TOKEN:-}
-      MAX_CHAT_ID: ${MAX_CHAT_ID:-}
-      S3_ENDPOINT_URL: ${S3_ENDPOINT_URL}
-      S3_REGION: ${S3_REGION}
-      S3_BUCKET: ${S3_BUCKET}
-      S3_ACCESS_KEY: ${S3_ACCESS_KEY}
-      S3_SECRET_KEY: ${S3_SECRET_KEY}
+      # Проверка на старте: без внешнего адреса ссылки в письмах
+      # и в выводе консольных команд будут вести на localhost.
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:?укажите PUBLIC_BASE_URL в .env}
     ports:
       # Наружу порт не открывается: перед сервисом стоит обратный прокси,
       # он же терминирует HTTPS.
