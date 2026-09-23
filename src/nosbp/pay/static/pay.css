@@ -1,0 +1,69 @@
+/* Оформление публичной страницы оплаты.
+
+   Отдельный файл, а не стили в разметке: политика безопасности запрещает
+   странице выполнять и применять что-либо встроенное. */
+
+:root {
+  --ink: #101828;
+  --muted: #667085;
+  --line: #eaecf0;
+  --paper: #f4f5f7;
+  --surface: #ffffff;
+  --accent: #2f6fed;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  padding: 24px 12px 48px;
+  background: var(--paper);
+  color: var(--ink);
+  font: 15px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+}
+
+.sheet {
+  max-width: 520px;
+  margin: 0 auto;
+  background: var(--surface);
+  border-radius: 14px;
+  padding: 28px 24px 24px;
+}
+
+h1 { font-size: 20px; margin: 0 0 4px; }
+h2 { font-size: 15px; margin: 28px 0 10px; color: var(--muted); font-weight: 600; }
+p { margin: 0 0 12px; }
+
+.payee { color: var(--muted); margin: 0 0 20px; }
+
+.amount { font-size: 34px; font-weight: 700; letter-spacing: -0.5px; }
+.amount.free { font-size: 20px; font-weight: 600; }
+.purpose { color: var(--muted); margin: 6px 0 0; }
+
+.qr { text-align: center; margin: 24px 0 8px; }
+.qr img {
+  width: 260px;
+  max-width: 100%;
+  height: auto;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+.qr .hint { color: var(--muted); font-size: 13px; margin: 12px 0 0; }
+
+table { width: 100%; border-collapse: collapse; }
+th, td { text-align: left; padding: 9px 0; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { width: 42%; font-weight: 400; color: var(--muted); }
+td { word-break: break-word; }
+.mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+
+footer {
+  max-width: 520px;
+  margin: 18px auto 0;
+  color: var(--muted);
+  font-size: 12px;
+  text-align: center;
+}
+footer a { color: var(--muted); }
+
+.empty { text-align: center; padding: 24px 0; }
+.empty h1 { margin-bottom: 10px; }

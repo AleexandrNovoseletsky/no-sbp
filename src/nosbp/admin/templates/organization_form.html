@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% from "organization_fields.html" import organization_fields %}
+{% block title %}{{ 'Организация' if organization else 'Новая организация' }} — NoSBP{% endblock %}
+{% block content %}
+
+{% set action = admin_prefix ~ '/organizations/' ~ organization.id ~ '/edit'
+   if organization else admin_prefix ~ '/accounts/' ~ account.id ~ '/organizations/new' %}
+
+<h1>{{ organization.name if organization else 'Новая организация' }}</h1>
+<p class="sub">Заказчик:
+   <a href="{{ admin_prefix }}/accounts/{{ account.id }}">{{ account.display_name }}</a></p>
+
+<div class="card card-wide">
+<form method="post" action="{{ action }}" enctype="multipart/form-data">
+  <input type="hidden" name="{{ csrf_field }}" value="{{ csrf }}">
+  {{ organization_fields(form, organization, settings, format_fee_percent) }}
+  <div class="actions">
+    <button type="submit">{{ 'Сохранить' if organization else 'Добавить' }}</button>
+    <a class="btn ghost" href="{{ admin_prefix }}/accounts/{{ account.id }}">Отмена</a>
+  </div>
+</form>
+</div>
+{% endblock %}

@@ -1,0 +1,44 @@
+# Упрощённый сервис генерации QR-кодов для одной организации.
+#
+# Разворачивается отдельно от полного сервиса — например, на сервере,
+# где уже стоит сайт компании. Ни базы данных, ни объектного хранилища
+# ему не нужно: один контейнер и один файл настроек.
+#
+#   cp solo/.env.example solo/.env
+#   nano solo/.env
+#   docker compose -f docker-compose.solo.yml up -d --build
+
+services:
+  qr:
+    build:
+      context: .
+      dockerfile: solo/Dockerfile
+    image: nosbp-solo
+    container_name: nosbp-solo
+    restart: unless-stopped
+
+    # Реквизиты и ключ доступа. Файл создаётся из solo/.env.example.
+    env_file: solo/.env
+
+    ports:
+      # Наружу порт не открывается: перед сервисом стоит nginx,
+      # он же терминирует HTTPS.
+      - "127.0.0.1:8081:8000"
+
+    volumes:
+      # Логотип для центра QR-кода, если он нужен. Положите файл
+      # в solo/logo и укажите LOGO_PATH=/app/logo/имя-файла.png
+      - ./solo/logo:/app/logo:ro
+
+    deploy:
+      resources:
+        limits:
+          # Сервис держит в памяти один шрифт и один логотип.
+          memory: 256m
+
+    logging:
+      # Без ограничения журнал контейнера растёт до заполнения диска.
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

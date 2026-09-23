@@ -1,0 +1,317 @@
+{% extends "base.html" %}
+{% block title %}{{ account.display_name }} — NoSBP{% endblock %}
+{% block content %}
+
+<h1>{{ account.display_name }}</h1>
+<p class="sub mono">{{ account.email }} · заведён {{ account.created_at.strftime('%d.%m.%Y') }}</p>
+<p class="sub">
+  {% if account.email_confirmed_at %}
+    <span class="pill on">почта подтверждена {{ account.email_confirmed_at.strftime('%d.%m.%Y') }}</span>
+  {% else %}
+    <span class="pill off">почта не подтверждена</span>
+  {% endif %}
+</p>
+
+{% if invite_url %}
+<div class="token-box">
+  <b>Ссылка для входа в кабинет.</b> Одноразовая, действует
+  {{ settings.cabinet_invite_ttl_hours }} часов. Она отправлена заказчику
+  на почту — передавайте вручную, только если письмо не дошло.
+  <span class="mono">{{ invite_url }}</span>
+</div>
+{% endif %}
+
+{% if issued_token %}
+<div class="token-box">
+  <b>Новый ключ.</b> Он показывается один раз — скопируйте сейчас.
+  <span class="mono">{{ issued_token }}</span>
+</div>
+{% endif %}
+
+<div class="tabs">
+  <a href="{{ admin_prefix }}/accounts/{{ account.id }}?period=month"
+     class="{{ 'active' if period == 'month' else '' }}">За текущий месяц</a>
+  <a href="{{ admin_prefix }}/accounts/{{ account.id }}?period=all"
+     class="{{ 'active' if period != 'month' else '' }}">За всё время</a>
+</div>
+
+<div class="kpi">
+  <div><div class="n">{{ stats.invoice_count }}</div><div class="l">уникальных счетов</div></div>
+  <div><div class="n">{{ stats.hit_count }}</div><div class="l">обращений к API</div></div>
+  <div><div class="n">{{ format_roubles(stats.turnover_kopecks, fractional=False) }}</div><div class="l">оборот</div></div>
+  <div><div class="n">{{ format_roubles(stats.acquiring_cost_kopecks, fractional=False) }}</div><div class="l">стоил бы эквайринг</div></div>
+  <div><div class="n">{{ format_roubles(stats.charged_kopecks) }}</div><div class="l">заплачено нам</div></div>
+  <div><div class="n">{{ format_roubles(stats.savings_kopecks, fractional=False) }}</div><div class="l">сэкономлено</div></div>
+</div>
+
+<!-- ---------------- Карточка ---------------- -->
+<h2>Карточка</h2>
+<div class="card">
+<form method="post" action="{{ admin_prefix }}/accounts/{{ account.id }}/edit">
+  <input type="hidden" name="{{ csrf_field }}" value="{{ csrf }}">
+  <div class="grid two">
+    <div class="field">
+      <label for="display_name">Название компании</label>
+      <input id="display_name" type="text" name="display_name" value="{{ edit.display_name }}" required>
+    </div>
+    <div class="field">
+      <label for="daily_limit">Суточный лимит списаний, ₽</label>
+      <input id="daily_limit" type="text" name="daily_limit" inputmode="decimal"
+             placeholder="без ограничения" value="{{ edit.daily_limit }}">
+    </div>
+  </div>
+  <label class="check">
+    <input type="checkbox" name="is_active" value="1" {{ 'checked' if edit.is_active }}>
+    Аккаунт работает
+  </label>
+  <label class="check">
+    <input type="checkbox" name="is_unlimited" value="1" {{ 'checked' if edit.is_unlimited }}>
+    Безлимит — счета генерируются бесплатно, баланс и лимиты не проверяются
+  </label>
+  <div class="actions">
+    <button type="submit">Сохранить</button>
+  </div>
+</form>
+</div>
+
+<!-- ---------------- Организации ---------------- -->
+<h2>Организации-получатели</h2>
+<div class="tablewrap">
+<table>
+  <thead>
+    <tr>
+      <th>Организация</th><th>Реквизиты</th><th>Оформление</th><th class="num">Ставка</th>
+      <th class="num">Операций</th><th class="num">Сэкономлено</th><th></th>
+    </tr>
+  </thead>
+  <tbody>
+  {% for item in stats.organizations %}
+    {% set org = item.organization %}
+    <tr>
+      <td>
+        <a href="{{ admin_prefix }}/organizations/{{ org.id }}">{{ org.name }}</a>
+        <div class="muted mono">org={{ org.alias }}{% if org.is_default %} · по умолчанию{% endif %}</div>
+      </td>
+      <td class="mono muted">
+        {{ org.personal_acc }}<br>{{ org.bank_name }} · БИК {{ org.bic }}
+      </td>
+      <td>
+        <span class="swatch" data-color="{{ org.qr_color }}"
+              title="{{ org.qr_color }}"></span>
+        {% if org.logo_key %}<span class="pill free">логотип</span>{% endif %}
+      </td>
+      <td class="num">
+        {{ format_fee_percent(org.acquiring_fee_bps) }}
+        {% if item.turnover_is_estimated %}
+          <div class="muted hint-small">по среднему чеку</div>
+        {% endif %}
+      </td>
+      <td class="num">{{ item.invoice_count }}</td>
+      <td class="num">{{ format_roubles(item.savings_kopecks, fractional=False) }}</td>
+      <td class="num">
+        <form method="post" action="{{ admin_prefix }}/organizations/{{ org.id }}/delete"
+              data-confirm="Удалить организацию «{{ org.alias }}» вместе с её счетами?">
+          <input type="hidden" name="{{ csrf_field }}" value="{{ csrf }}">
+          <button class="ghost" type="submit">Удалить</button>
+        </form>
+      </td>
+    </tr>
+  {% else %}
+    <tr><td colspan="7" class="muted">Организаций пока нет — QR генерировать не из чего.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+<div class="actions">
+  <a class="btn" href="{{ admin_prefix }}/accounts/{{ account.id }}/organizations/new">Добавить организацию</a>
+</div>
+
+<!-- ---------------- Баланс ---------------- -->
+<h2>Баланс</h2>
+<div class="card">
+  <div class="kpi">
+    <div>
+      <div class="n">{{ format_roubles(account.balance_kopecks) }}</div>
+      <div class="l">текущий баланс</div>
+    </div>
+    {% if ledger_balance != account.balance_kopecks %}
+    <div>
+      <div class="n alarm">{{ format_roubles(ledger_balance) }}</div>
+      <div class="l">по журналу — расхождение!</div>
+    </div>
+    {% endif %}
+    {% if account.overdraft_until %}
+    <div>
+      <div class="n">{{ account.overdraft_until.strftime('%d.%m.%Y') }}</div>
+      <div class="l">работа в долг до</div>
+    </div>
+    {% endif %}
+  </div>
+
+  {% if account.is_unlimited %}
+    <p class="muted">Аккаунт на безлимите: списания не происходят, но операции
+       баланса по-прежнему доступны.</p>
+  {% endif %}
+
+  <form method="post" action="{{ admin_prefix }}/accounts/{{ account.id }}/balance">
+    <input type="hidden" name="{{ csrf_field }}" value="{{ csrf }}">
+    <div class="grid three">
+      <div class="field">
+        <label for="operation">Операция</label>
+        <select id="operation" name="operation">
+          <option value="topup" {{ 'selected' if balance.operation == 'topup' }}>Пополнение</option>
+          <option value="refund" {{ 'selected' if balance.operation == 'refund' }}>Возврат</option>
+          <option value="adjust" {{ 'selected' if balance.operation == 'adjust' }}>Корректировка</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="amount">Сумма, ₽</label>
+        <input id="amount" type="text" name="amount" inputmode="decimal" required
+               placeholder="1000 или -50 для корректировки" value="{{ balance.amount }}">
+      </div>
+      <div class="field">
+        <label for="comment">Комментарий в выписку</label>
+        <input id="comment" type="text" name="comment" placeholder="за что"
+               value="{{ balance.comment }}">
+      </div>
+    </div>
+    <div class="actions"><button type="submit">Провести</button></div>
+  </form>
+</div>
+
+<!-- ---------------- Ключи ---------------- -->
+<h2>Ключи API</h2>
+<div class="tablewrap">
+<table>
+  <thead><tr><th>Ключ</th><th>Название</th><th>Последнее использование</th><th></th></tr></thead>
+  <tbody>
+  {% for token in tokens %}
+    <tr>
+      <td class="mono">{{ token.prefix }}…
+        {% if token.revoked_at %}<span class="pill off">отозван</span>{% endif %}
+      </td>
+      <td>{{ token.label or '—' }}</td>
+      <td class="muted">
+        {{ token.last_used_at.strftime('%d.%m.%Y %H:%M') if token.last_used_at else 'ни разу' }}
+      </td>
+      <td class="num">
+        {% if not token.revoked_at %}
+        <form method="post"
+              action="{{ admin_prefix }}/accounts/{{ account.id }}/tokens/{{ token.id }}/revoke"
+              data-confirm="Отозвать ключ {{ token.prefix }}…? Интеграция перестанет работать сразу.">
+          <input type="hidden" name="{{ csrf_field }}" value="{{ csrf }}">
+          <button class="ghost" type="submit">Отозвать</button>
+        </form>
+        {% endif %}
+      </td>
+    </tr>
+  {% else %}
+    <tr><td colspan="4" class="muted">Ключей пока нет.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+<form method="post" action="{{ admin_prefix }}/accounts/{{ account.id }}/tokens" class="actions">
+  <input type="hidden" name="{{ csrf_field }}" value="{{ csrf }}">
+  <input type="text" name="label" placeholder="Название: RetailCRM, Сайт…" class="field-label">
+  <button type="submit">Выпустить ключ</button>
+</form>
+
+<!-- ---------------- Доступ в кабинет ---------------- -->
+<h2>Доступ в личный кабинет</h2>
+<div class="card">
+  <p class="tight">
+    {% if account.password_hash %}
+      Пароль задан — заказчик входит сам по адресу
+      <span class="mono">{{ settings.public_base_url }}{{ settings.cabinet_path_prefix }}/login</span>,
+      а забытый пароль восстанавливает без нас, по ссылке «Забыли пароль?».
+    {% else %}
+      Пароль не задан: аккаунт заведён здесь, а не самим заказчиком.
+      Без ссылки войти в кабинет он не сможет.
+    {% endif %}
+  </p>
+  <form method="post" action="{{ admin_prefix }}/accounts/{{ account.id }}/invite">
+    <input type="hidden" name="{{ csrf_field }}" value="{{ csrf }}">
+    <button type="submit">Отправить ссылку на почту</button>
+  </form>
+  <p class="muted hint">Прежние выданные ссылки при этом перестают работать.
+     {% if not settings.mail_configured %}
+       Почта не настроена: письмо не уйдёт, ссылка появится здесь на странице.
+     {% endif %}</p>
+</div>
+
+<!-- ---------------- История счетов ---------------- -->
+<h2>История счетов</h2>
+<p class="sub">Последние {{ invoices | length }} за всё время работы.
+   Повторные обращения к одному счёту в течение бесплатного периода
+   не создают новой генерации, но учитываются в столбце «обращений».</p>
+<div class="tablewrap">
+<table>
+  <thead>
+    <tr>
+      <th>Последнее обращение</th><th>Организация</th><th>Назначение</th>
+      <th class="num">Сумма</th><th class="num">Обращений</th>
+      <th class="num">Тарификаций</th><th>Бесплатно до</th>
+    </tr>
+  </thead>
+  <tbody>
+  {% for invoice, alias in invoices %}
+    <tr>
+      <td class="muted mono">{{ invoice.last_seen_at.strftime('%d.%m.%Y %H:%M') }}</td>
+      <td class="mono">{{ alias }}</td>
+      <td>{{ invoice.purpose or '—' }}</td>
+      <td class="num">
+        {% if invoice.sum_kopecks %}
+          {{ format_roubles(invoice.sum_kopecks) }}
+        {% else %}
+          <span class="muted">вводит плательщик</span>
+        {% endif %}
+      </td>
+      <td class="num">{{ invoice.hit_count }}</td>
+      <td class="num">{{ invoice.charge_count }}</td>
+      <td class="muted mono">{{ invoice.expires_at.strftime('%d.%m.%Y') }}</td>
+    </tr>
+  {% else %}
+    <tr><td colspan="7" class="muted">Счетов пока не было.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+
+<!-- ---------------- Выписка ---------------- -->
+<h2>Выписка</h2>
+{% if account.is_unlimited %}
+<p class="sub">Аккаунт обслуживается без списаний, поэтому денежных
+   операций в выписке нет. Учёт счетов и экономии ведётся выше.</p>
+{% endif %}
+<div class="tablewrap">
+<table>
+  <thead><tr><th>Когда</th><th>Операция</th><th class="num">Сумма</th><th class="num">Остаток</th><th>Комментарий</th></tr></thead>
+  <tbody>
+  {% for entry in ledger %}
+    <tr>
+      <td class="muted mono">{{ entry.created_at.strftime('%d.%m.%Y %H:%M') }}</td>
+      <td>{{ entry.entry_type }}</td>
+      <td class="num">{{ format_roubles(entry.amount_kopecks) }}</td>
+      <td class="num muted">{{ format_roubles(entry.balance_after_kopecks) }}</td>
+      <td class="muted">{{ entry.comment }}</td>
+    </tr>
+  {% else %}
+    <tr><td colspan="5" class="muted">Операций пока не было.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+
+<!-- ---------------- Удаление ---------------- -->
+<h2>Удаление</h2>
+<div class="card">
+  <p class="muted tight">Удаляются организации, ключи, счета и вся
+     выписка. Восстановить можно только из резервной копии.</p>
+  <form method="post" action="{{ admin_prefix }}/accounts/{{ account.id }}/delete"
+        data-confirm="Удалить заказчика {{ account.email }} со всеми данными? Это необратимо.">
+    <input type="hidden" name="{{ csrf_field }}" value="{{ csrf }}">
+    <button class="danger" type="submit">Удалить заказчика</button>
+  </form>
+</div>
+{% endblock %}

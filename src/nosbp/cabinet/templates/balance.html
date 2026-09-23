@@ -1,0 +1,92 @@
+{% extends "base.html" %}
+{% block title %}Баланс — NoSBP{% endblock %}
+{% block content %}
+
+<h1>Баланс</h1>
+
+<div class="kpi">
+  <div>
+    <div class="n">
+      {% if account.is_unlimited %}
+        безлимит
+      {% else %}
+        {{ format_roubles(account.balance_kopecks) }}
+      {% endif %}
+    </div>
+    <div class="l">текущий баланс</div>
+  </div>
+  {% if account.overdraft_until %}
+  <div>
+    <div class="n alarm">{{ account.overdraft_until.strftime('%d.%m.%Y') }}</div>
+    <div class="l">работа в долг до</div>
+  </div>
+  {% endif %}
+</div>
+
+{% if account.is_unlimited %}
+  <p class="sub">Ваш аккаунт обслуживается без списаний: счета генерируются
+     бесплатно. Статистика при этом ведётся полностью — она на
+     <a href="{{ cabinet_prefix }}/statistics">странице статистики</a>.</p>
+{% else %}
+  <div class="card">
+    <p class="tight">Пополнение баланса пока оформляется через поддержку:
+       напишите нам, и мы выставим счёт. Автоматическое пополнение
+       появится позже.</p>
+    <p class="muted">
+      Один счёт стоит {{ format_roubles(settings.invoice_price_kopecks) }}.
+      Повторные обращения к тому же счёту в течение
+      {{ settings.invoice_free_period_days }} дней бесплатны.
+      {% if account.daily_charge_limit_kopecks is not none %}
+        Суточный лимит списаний:
+        {{ format_roubles(account.daily_charge_limit_kopecks, fractional=False) }}.
+      {% endif %}
+    </p>
+  </div>
+{% endif %}
+
+<h2>Выписка</h2>
+<div class="tablewrap">
+<table>
+  <thead><tr><th>Когда</th><th>Операция</th><th class="num">Сумма</th><th class="num">Остаток</th><th>Комментарий</th></tr></thead>
+  <tbody>
+  {% for entry in ledger %}
+    <tr>
+      <td class="muted mono">{{ entry.created_at.strftime('%d.%m.%Y %H:%M') }}</td>
+      <td>{{ entry.entry_type }}</td>
+      <td class="num">{{ format_roubles(entry.amount_kopecks) }}</td>
+      <td class="num muted">{{ format_roubles(entry.balance_after_kopecks) }}</td>
+      <td class="muted">{{ entry.comment }}</td>
+    </tr>
+  {% else %}
+    <tr><td colspan="5" class="muted">Операций пока не было.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+
+<h2>Смена пароля</h2>
+<div class="card card-medium">
+  <p class="muted tight">После смены пароля все открытые сессии закрываются.</p>
+  <form method="post" action="{{ cabinet_prefix }}/password">
+    <input type="hidden" name="{{ csrf_field }}" value="{{ csrf }}">
+    <div class="field spaced">
+      <label for="current_password">Текущий пароль</label>
+      <input id="current_password" type="password" name="current_password" required
+             autocomplete="current-password">
+    </div>
+    <div class="grid two spaced">
+      <div class="field">
+        <label for="new_password">Новый пароль</label>
+        <input id="new_password" type="password" name="new_password" required
+               autocomplete="new-password">
+      </div>
+      <div class="field">
+        <label for="new_password_repeat">Ещё раз</label>
+        <input id="new_password_repeat" type="password" name="new_password_repeat"
+               required autocomplete="new-password">
+      </div>
+    </div>
+    <div class="actions"><button type="submit">Сменить пароль</button></div>
+  </form>
+</div>
+{% endblock %}

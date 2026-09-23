@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}Восстановление пароля — NoSBP{% endblock %}
+{% block content %}
+<div class="card card-narrow">
+  <h1>Восстановление пароля</h1>
+  <p class="sub">Укажите адрес, на который заведён аккаунт. Мы пришлём
+     ссылку для установки нового пароля.</p>
+
+  <form method="post" action="{{ cabinet_prefix }}/forgot">
+    <div class="field spaced">
+      <label for="email">Почта</label>
+      <input id="email" type="email" name="email" required autofocus
+             autocomplete="username" value="{{ form.email | default('') }}">
+    </div>
+    <div class="actions">
+      <button type="submit">Прислать ссылку</button>
+      <a class="btn ghost" href="{{ cabinet_prefix }}/login">Вернуться ко входу</a>
+    </div>
+  </form>
+
+  <p class="hint" style="margin-top:18px">
+    Так же это работает, если аккаунт заводили за вас и пароль ни разу
+    не задавался: ссылка задаст его в первый раз.
+  </p>
+
+  {% if settings.support_email %}
+    <p class="hint">Письмо не пришло за несколько минут? Проверьте папку
+       «Спам» или напишите на
+       <a href="mailto:{{ settings.support_email }}">{{ settings.support_email }}</a>.</p>
+  {% endif %}
+</div>
+{% endblock %}

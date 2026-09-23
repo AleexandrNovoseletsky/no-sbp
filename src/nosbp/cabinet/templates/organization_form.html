@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% from "organization_fields.html" import organization_fields %}
+{% block title %}{{ 'Организация' if organization else 'Новая организация' }} — NoSBP{% endblock %}
+{% block content %}
+
+{% set action = cabinet_prefix ~ '/organizations/' ~ organization.id ~ '/edit'
+   if organization else cabinet_prefix ~ '/organizations/new' %}
+
+<h1>{{ organization.name if organization else 'Новая организация' }}</h1>
+<p class="sub">Реквизиты попадают в QR-код и видны плательщику.</p>
+
+<div class="card card-wide">
+<form method="post" action="{{ action }}" enctype="multipart/form-data">
+  <input type="hidden" name="{{ csrf_field }}" value="{{ csrf }}">
+  {{ organization_fields(form, organization, settings, format_fee_percent) }}
+  <div class="actions">
+    <button type="submit">{{ 'Сохранить' if organization else 'Добавить' }}</button>
+    <a class="btn ghost" href="{{ cabinet_prefix }}/">Отмена</a>
+  </div>
+</form>
+</div>
+{% endblock %}

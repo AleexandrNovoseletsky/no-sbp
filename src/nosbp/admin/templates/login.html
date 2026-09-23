@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}Вход — NoSBP{% endblock %}
+{% block content %}
+<div class="card card-narrow">
+  <h1>Панель NoSBP</h1>
+  <p class="sub">Вход только для администраторов сервиса.</p>
+  <form method="post" action="{{ admin_prefix }}/login">
+    <div class="field spaced">
+      <label for="email">Почта</label>
+      <input id="email" type="email" name="email" value="{{ email | default('') }}"
+             required autocomplete="username" autofocus>
+    </div>
+    <div class="field spaced">
+      <label for="password">Пароль</label>
+      <input id="password" type="password" name="password" required
+             autocomplete="current-password">
+    </div>
+    {% if settings.admin_require_totp %}
+    <div class="field">
+      <label for="totp_code">Код из приложения-аутентификатора</label>
+      <input id="totp_code" type="text" name="totp_code" inputmode="numeric"
+             autocomplete="one-time-code" pattern="[0-9 ]*" required>
+    </div>
+    {% endif %}
+    <div class="actions">
+      <button type="submit">Войти</button>
+    </div>
+  </form>
+</div>
+{% endblock %}

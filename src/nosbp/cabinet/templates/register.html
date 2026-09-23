@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}Регистрация — NoSBP{% endblock %}
+{% block content %}
+<div class="card card-narrow">
+  <h1>Регистрация</h1>
+  <p class="sub">Один рубль за счёт вместо комиссии эквайринга.</p>
+  <form method="post" action="{{ cabinet_prefix }}/register">
+    <div class="field spaced">
+      <label for="email">Почта</label>
+      <input id="email" type="email" name="email" value="{{ form.email }}"
+             required autocomplete="username" autofocus>
+    </div>
+    <div class="field spaced">
+      <label for="display_name">Название компании</label>
+      <input id="display_name" type="text" name="display_name"
+             value="{{ form.display_name }}" required>
+    </div>
+    <div class="field spaced">
+      <label for="password">Пароль</label>
+      <input id="password" type="password" name="password" required
+             autocomplete="new-password">
+      <span class="hint">Не короче 12 символов, буквы и цифры.</span>
+    </div>
+    <div class="field spaced">
+      <label for="password_repeat">Пароль ещё раз</label>
+      <input id="password_repeat" type="password" name="password_repeat" required
+             autocomplete="new-password">
+    </div>
+    <div class="actions">
+      <button type="submit">Зарегистрироваться</button>
+      <a class="btn ghost" href="{{ cabinet_prefix }}/login">Уже есть аккаунт</a>
+    </div>
+  </form>
+</div>
+{% endblock %}

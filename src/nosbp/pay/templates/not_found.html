@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block title %}Счёт не найден{% endblock %}
+{% block content %}
+<div class="empty">
+  <h1>Счёт не найден</h1>
+  <p>Ссылка неверна или счёт был удалён. Запросите новую ссылку
+     у того, кто выставил счёт.</p>
+  {% if settings.support_email %}
+    <p>Вопросы по сервису: <a href="mailto:{{ settings.support_email }}">{{ settings.support_email }}</a></p>
+  {% endif %}
+</div>
+{% endblock %}

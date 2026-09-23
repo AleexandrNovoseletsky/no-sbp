@@ -1,0 +1,72 @@
+# Продакшен: приложение и база. Объектное хранилище — внешнее,
+# у провайдера, поэтому MinIO здесь нет.
+#
+# Запуск:  docker compose -f docker-compose.prod.yml up -d
+# Все секреты берутся из файла .env рядом с этим файлом.
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: nosbp-postgres
+    restart: always
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  api:
+    image: ${IMAGE:-nosbp:latest}
+    container_name: nosbp-api
+    restart: always
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # Настройки читаются из .env целиком, а не переписываются сюда
+    # по одной: перечисление приходилось бы дополнять при каждой новой
+    # настройке, и забытая переменная не доезжала бы до контейнера молча.
+    # Состав файла описан в deploy/env.production.example.
+    env_file: .env
+    environment:
+      # Единственное, что не из .env: рабочее окружение определяется
+      # тем, каким файлом compose поднят сервис.
+      ENVIRONMENT: production
+      # Проверка на старте: без внешнего адреса ссылки в письмах
+      # и в выводе консольных команд будут вести на localhost.
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:?укажите PUBLIC_BASE_URL в .env}
+    ports:
+      # Наружу порт не открывается: перед сервисом стоит обратный прокси,
+      # он же терминирует HTTPS.
+      - "127.0.0.1:8000:8000"
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+    logging:
+      # Без ограничения журнал контейнера растёт до заполнения диска.
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+volumes:
+  # Именованный том: данные живут отдельно от контейнера и переживают
+  # его пересоздание. При переносе на другой сервер том не копируется —
+  # переносится дамп, см. docker/backup.sh и раздел README о переезде.
+  postgres-data:
+    name: nosbp-postgres-data

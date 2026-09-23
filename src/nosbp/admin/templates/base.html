@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>{% block title %}Панель NoSBP{% endblock %}</title>
+<link rel="icon" href="{{ admin_prefix }}/static/favicon.svg">
+<link rel="stylesheet" href="{{ admin_prefix }}/static/admin.css">
+</head>
+<body>
+{% if viewer %}
+<header>
+  <a class="brand" href="{{ admin_prefix }}/">NoSBP</a>
+  <a href="{{ admin_prefix }}/">Заказчики</a>
+  <span class="spacer"></span>
+  <span class="who">{{ viewer.email }}</span>
+  <form method="post" action="{{ admin_prefix }}/logout" class="inline">
+    <input type="hidden" name="{{ csrf_field }}" value="{{ csrf }}">
+    <button class="ghost" type="submit">Выйти</button>
+  </form>
+</header>
+{% endif %}
+<main>
+  {% if ok %}<div class="flash ok">{{ ok }}</div>{% endif %}
+  {% if err %}<div class="flash err">{{ err }}</div>{% endif %}
+  {% block content %}{% endblock %}
+</main>
+<script src="{{ admin_prefix }}/static/admin.js"></script>
+</body>
+</html>

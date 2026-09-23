@@ -1,80 +1,74 @@
-"""Схемы для генерации платежей."""
+"""Схемы данных для генерации платёжного QR-кода.
 
-from pydantic import BaseModel, Field
+Ограничения длин берутся из :mod:`nosbp.core.constants` — из того же
+места, что и колонки базы и описания HTTP-параметров.
+"""
+
+from pydantic import BaseModel, ConfigDict, Field
+
+from nosbp.core.constants import (
+    ACCOUNT_PATTERN,
+    BANK_NAME_MAX_LENGTH,
+    BIC_PATTERN,
+    INN_PATTERN,
+    KPP_PATTERN,
+    MAX_SUM_KOPECKS,
+    NAME_MAX_LENGTH,
+    PHONE_MAX_LENGTH,
+    PURPOSE_MAX_LENGTH,
+)
 
 
-class PaymentDetails(BaseModel):
-    """Получатель платежа."""
+class PayerInfo(BaseModel):
+    """Данные плательщика.
 
-    name: str = Field(
-        description="Название получателя платежа",
-        min_length=1,
-        max_length=160,
-    )
-    personal_acc: str = Field(
-        description="Расчётный счёт",
-        pattern=r"^\d{20}$",
-    )
-    bank_name: str = Field(
-        description="Наименование банка",
-        min_length=1,
-        max_length=45,
-    )
+    Эти поля попадают в строку ГОСТ, но НИКОГДА не сохраняются в базу —
+    они участвуют только в вычислении ключа идемпотентности, то есть
+    превращаются в необратимый хэш. Хранение персональных данных
+    плательщиков — забота заказчика, а не сервиса.
+    """
 
-    bic: str = Field(
-        description="БИК банка",
-        pattern=r"^\d{9}$",
-    )
+    model_config = ConfigDict(frozen=True)
 
-    payee_inn: str = Field(
-        description="ИНН получателя",
-        pattern=r"^\d{10}$|^\d{12}$",
-    )
+    last_name: str | None = Field(default=None, max_length=NAME_MAX_LENGTH)
+    first_name: str | None = Field(default=None, max_length=NAME_MAX_LENGTH)
+    middle_name: str | None = Field(default=None, max_length=NAME_MAX_LENGTH)
+    phone: str | None = Field(default=None, max_length=PHONE_MAX_LENGTH)
 
-    corresp_acc: str | None = Field(
-        description="Корр.счёт",
-        default=None,
-        pattern=r"^\d{20}$",
-    )
 
-    kpp: str | None = Field(
-        description="КПП получателя",
-        default=None,
-        pattern=r"^\d{9}$",
-    )
+class PaymentRequest(BaseModel):
+    """Динамическая часть запроса — то, что меняется от счёта к счёту."""
 
-    payment_sum: int | None = Field(
-        description="Сумма платежа в копейках",
+    model_config = ConfigDict(frozen=True)
+
+    sum_kopecks: int | None = Field(
         default=None,
         ge=1,
+        le=MAX_SUM_KOPECKS,
+        description="Сумма платежа в копейках, как того требует ГОСТ.",
     )
-
     purpose: str | None = Field(
-        description="Назначение платежа",
         default=None,
-        max_length=210,
+        max_length=PURPOSE_MAX_LENGTH,
+        description="Назначение платежа.",
     )
+    payer: PayerInfo = Field(default_factory=PayerInfo)
 
-    first_name: str | None = Field(
-        description="Имя плательщика",
-        default=None,
-        max_length=160,
-    )
 
-    last_name: str | None = Field(
-        description="Фамилия плательщика",
-        default=None,
-        max_length=160,
-    )
+class PayeeRequisites(BaseModel):
+    """Реквизиты получателя платежа.
 
-    middle_name: str | None = Field(
-        description="Отчество плательщика",
-        default=None,
-        max_length=160,
-    )
+    Собирается из модели ``Organization``. Контрольные разряды проверяются
+    при сохранении организации, а не на каждом запросе — здесь схема нужна
+    как типизированный контракт между слоем данных и генератором строки ГОСТ.
+    """
 
-    phone: str | None = Field(
-        description="Телефон плательщика",
-        default=None,
-        max_length=25
-    )
+    model_config = ConfigDict(frozen=True)
+
+    name: str = Field(min_length=1, max_length=NAME_MAX_LENGTH)
+    personal_acc: str = Field(pattern=ACCOUNT_PATTERN)
+    bank_name: str = Field(min_length=1, max_length=BANK_NAME_MAX_LENGTH)
+    bic: str = Field(pattern=BIC_PATTERN)
+    corresp_acc: str = Field(pattern=ACCOUNT_PATTERN)
+    payee_inn: str = Field(pattern=INN_PATTERN)
+    kpp: str | None = Field(default=None, pattern=KPP_PATTERN)

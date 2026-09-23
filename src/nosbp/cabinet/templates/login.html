@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}Вход — NoSBP{% endblock %}
+{% block content %}
+<div class="card card-narrow">
+  <h1>Вход</h1>
+  <p class="sub">Личный кабинет NoSBP.</p>
+  <form method="post" action="{{ cabinet_prefix }}/login">
+    <div class="field spaced">
+      <label for="email">Почта</label>
+      <input id="email" type="email" name="email" value="{{ email | default('') }}"
+             required autocomplete="username" autofocus>
+    </div>
+    <div class="field spaced">
+      <label for="password">Пароль</label>
+      <input id="password" type="password" name="password" required
+             autocomplete="current-password">
+    </div>
+    <div class="actions">
+      <button type="submit">Войти</button>
+      {% if settings.cabinet_registration_open %}
+        <a class="btn ghost" href="{{ cabinet_prefix }}/register">Регистрация</a>
+      {% endif %}
+    </div>
+    <p class="hint" style="margin-top:14px">
+      <a href="{{ cabinet_prefix }}/forgot">Забыли пароль?</a>
+    </p>
+  </form>
+</div>
+{% endblock %}

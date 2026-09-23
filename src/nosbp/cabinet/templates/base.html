@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}Личный кабинет NoSBP{% endblock %}</title>
+<link rel="icon" href="{{ cabinet_prefix }}/static/favicon.svg">
+<link rel="stylesheet" href="{{ cabinet_prefix }}/static/admin.css">
+</head>
+<body>
+{% if viewer %}
+<header>
+  <a class="brand" href="{{ cabinet_prefix }}/">NoSBP</a>
+  <a href="{{ cabinet_prefix }}/">Обзор</a>
+  <a href="{{ cabinet_prefix }}/statistics">Статистика</a>
+  <a href="{{ cabinet_prefix }}/balance">Баланс</a>
+  <span class="spacer"></span>
+  <span class="who">{{ viewer.display_name }}</span>
+  <form method="post" action="{{ cabinet_prefix }}/logout" class="inline">
+    <input type="hidden" name="{{ csrf_field }}" value="{{ csrf }}">
+    <button class="ghost" type="submit">Выйти</button>
+  </form>
+</header>
+{% endif %}
+<main>
+  {% if ok %}<div class="flash ok">{{ ok }}</div>{% endif %}
+  {% if err %}<div class="flash err">{{ err }}</div>{% endif %}
+  {% block content %}{% endblock %}
+</main>
+<script src="{{ cabinet_prefix }}/static/admin.js"></script>
+</body>
+</html>
